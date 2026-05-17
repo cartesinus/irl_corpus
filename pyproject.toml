@@ -1,0 +1,23 @@
+[project]
+name = "twitch-annotation-corpus"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+dependencies = [
+    "numpy",
+    "torch",
+    "torchaudio",
+    "google-genai",
+]
+
+[project.optional-dependencies]
+vad = [
+    "silero-vad",
+]
+vis = [
+    "matplotlib",
+]
+all = [
+    "silero-vad",
+    "matplotlib",
+]

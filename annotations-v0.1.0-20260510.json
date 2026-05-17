@@ -1,0 +1,145 @@
+{
+  "version": "0.1.0",
+  "date": "20260510",
+  "tiers": {
+    "acoustic_scene": {
+      "description": "Longer regions describing the sound environment.",
+      "values": {
+        "quiet_street": "outdoor street, little traffic/crowd noise",
+        "busy_street": "outdoor city/street with clear traffic/crowd noise",
+        "restaurant_cafe": "indoor food/drink place; voices, dishes, music, table noise",
+        "indoor_public": "indoor public place: station, mall, museum, airport, etc.",
+        "transport": "inside or near transport: car, bus, train, metro, plane",
+        "shop_market": "shop, market, stall area, commercial street",
+        "park": "outdoor green/park-like ambience",
+        "tourist_landmark": "sightseeing place, landmark, tourist attraction context",
+        "home_indoor": "private indoor room/home-like setting",
+        "other": "none of the above fits"
+      }
+    },
+    "visual_context": {
+      "description": "Longer regions describing the visible situation.",
+      "note": "Use the dominant label, unless overlapping annotations are easy.",
+      "values": {
+        "walking_outdoors": "camera/operator is walking outside",
+        "standing_outdoors": "outside, mostly stationary",
+        "inside_restaurant": "restaurant/cafe/bar interior visible",
+        "inside_transport": "car/bus/train/metro/plane interior",
+        "sightseeing": "landmark/tourist/place-description context",
+        "eating_drinking": "visible eating/drinking or food-focused scene",
+        "talking_to_camera": "speaker addresses audience/camera",
+        "camera_facing_scene": "camera mainly shows place/objects/street",
+        "camera_facing_speaker": "camera mainly shows speaking person",
+        "crowded_place": "many people visible / visually crowded"
+      }
+    },
+    "speech_activity": {
+      "description": "Speech/non-speech segmentation.",
+      "note": "For the pilot, it is fine to annotate only speech and leave gaps unannotated.",
+      "values": {
+        "speech": "human speech is present",
+        "non_speech": "no speech; only silence, music, traffic, ambience, etc.",
+        "uncertain": "maybe speech, but too unclear/noisy to decide"
+      }
+    },
+    "speaker_turn": {
+      "description": "Speaker role per speech segment.",
+      "note": "Do not aim for perfect diarization in the pilot.",
+      "values": {
+        "speaker_1": "main recurring/front speaker",
+        "speaker_2": "second recurring/interlocutor",
+        "background_speaker": "audible speech from people not part of main conversation",
+        "overlap": "two or more speakers at the same time",
+        "unknown": "speech present, but speaker role unclear"
+      }
+    },
+    "transcript": {
+      "description": "Text content of speech.",
+      "values": {
+        "verbatim_text": "corrected ASR or manual transcript",
+        "[inaudible]": "speech present but cannot transcribe",
+        "[unclear]": "partial/uncertain transcription",
+        "[laughter]": "laughter",
+        "[foreign_language]": "speech in unexpected/other language"
+      }
+    },
+    "translation": {
+      "description": "English translation, if useful.",
+      "values": {
+        "translated_text": "translation of the transcript",
+        "[missing]": "no translation available",
+        "[uncertain]": "translation uncertain"
+      }
+    },
+    "intelligibility": {
+      "description": "How understandable the speech is.",
+      "note": "Annotate per speech segment.",
+      "values": {
+        "5_very_clear": "clean, easy to transcribe",
+        "4_clear_mild_noise": "mostly clear, small noise",
+        "3_understandable_noisy": "understandable, but noise clearly affects speech",
+        "2_hard_to_understand": "only parts understandable",
+        "1_unintelligible": "speech detected, but meaning mostly lost"
+      }
+    },
+    "dominant_noise": {
+      "description": "Main interfering sound during speech.",
+      "note": "Pick the dominant one, not every possible background sound.",
+      "values": {
+        "none_low": "no major interference",
+        "traffic": "general road/city traffic",
+        "crowd": "many people/chatter",
+        "restaurant_noise": "dishes, tables, indoor crowd, cafe/restaurant ambience",
+        "music": "music clearly audible",
+        "wind": "wind/breath/mic turbulence",
+        "vehicle": "specific vehicle sound: bus, train, car interior, engine",
+        "construction": "tools, drilling, machinery",
+        "water": "river, fountain, rain, sea",
+        "other": "noise present but none fits"
+      }
+    },
+    "speaker_visibility": {
+      "description": "Whether the speaking person is visible.",
+      "note": "Useful for audiovisual speech/diarization tasks.",
+      "values": {
+        "speaker_visible": "speaking person visible enough to identify visually",
+        "speaker_partially_visible": "partly visible: side, back, cropped, briefly visible",
+        "speaker_off_camera": "main speaker audible but not visible",
+        "background_speech_only": "only background people are speaking",
+        "unknown": "cannot decide"
+      }
+    },
+    "topic": {
+      "description": "Coarse topic of the spoken segment or scene.",
+      "values": {
+        "food": "food, restaurant, eating, drinking",
+        "travel_logistics": "tickets, route, timing, hotel, transport, plans",
+        "sightseeing": "landmarks, city description, tourist observations",
+        "personal_story": "personal memory, opinion, anecdote",
+        "history_culture": "history, culture, local customs, explanations",
+        "shopping": "buying, prices, shops, markets",
+        "directions": "navigation, where to go, how to get somewhere",
+        "small_talk": "casual filler, greetings, reactions",
+        "other": "none of the above fits"
+      }
+    },
+    "privacy_redaction": {
+      "description": "Mark spans that should be anonymized.",
+      "values": {
+        "person_name": "real name",
+        "username": "online handle / account name",
+        "phone_email": "phone number, email, contact info",
+        "address": "exact address or very specific location",
+        "license_plate": "visible or spoken license plate",
+        "other_sensitive": "any other sensitive/private information"
+      }
+    },
+    "notes": {
+      "description": "Free comments.",
+      "example": "possible ASR error: \"tournement de terre\" probably \"tremblement de terre\"",
+      "values": {
+        "free_text": "anything unusual, uncertain, or worth checking later"
+      }
+    }
+  }
+}
