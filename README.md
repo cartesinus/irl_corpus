@@ -1,4 +1,4 @@
-# twitch-annotation-corpus
+# IRL Corpus
 
 ## Setup
 
