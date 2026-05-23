@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# IRL Corpus — local config (may contain DB credentials / storage keys)
+irl.toml
+
+# IRL Corpus — runtime data (never commit recordings or annotations to git)
+corpus.db
+*.db
+corpus_data/
+data/
+out.json
