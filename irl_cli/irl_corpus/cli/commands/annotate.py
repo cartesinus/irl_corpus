@@ -72,7 +72,7 @@ def annotate_visual(  # pylint: disable=too-many-locals
         help="Replace existing visual tier annotations (default: on).",
     ),
     annotations_json: Optional[Path] = typer.Option(
-        None, "--annotations", help="Path to annotations JSON (default: project root)."
+        None, "--annotations", help="Path to annotations JSON (default: annotations dir)."
     ),
 ):
     """Run Gemini visual scene annotation on a task's segment.
@@ -96,7 +96,7 @@ def annotate_visual(  # pylint: disable=too-many-locals
         # Resolve annotations JSON
         ann_json = annotations_json
         if ann_json is None:
-            candidate = _SCRIPTS_DIR.parent / "annotations-v0.1.0-20260510.json"
+            candidate = _SCRIPTS_DIR.parent / "annotations/annotations-v0.1.0-20260510.json"
             ann_json = candidate if candidate.exists() else None
 
         print(
@@ -129,7 +129,7 @@ def annotate_visual(  # pylint: disable=too-many-locals
                 raise typer.Exit(1) from exc
 
             ann_path = ann_json or (
-                _SCRIPTS_DIR.parent / "annotations-v0.1.0-20260510.json"
+                _SCRIPTS_DIR.parent / "annotations/annotations-v0.1.0-20260510.json"
             )
             if not ann_path.exists():
                 print(f"[red]Annotations JSON not found:[/red] {ann_path}")

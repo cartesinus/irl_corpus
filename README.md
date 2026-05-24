@@ -81,7 +81,7 @@ export IRL_TRANSCRIBE_URL="https://..."
 
 ```bash
 irl admin init                                        # create / migrate the database
-irl schema import annotations-v0.1.0-20260510.json   # import annotation schema
+irl schema import annotations/annotations-v0.1.0-20260510.json   # import annotation schema
 irl user add --name yourname --role admin             # add yourself
 irl user add --name alice                             # add other annotators
 ```
@@ -239,4 +239,4 @@ python scripts/add_transcripts_to_eaf.py \
     --eaf data/clip.eaf --chunks-dir chunks/ --out data/clip_transcribed.eaf
 ```
 
-Category definitions: [`annotations-v0.1.0-20260510.json`](annotations-v0.1.0-20260510.json)
+Category definitions: [`annotations-v0.1.0-20260510.json`](annotations/annotations-v0.1.0-20260510.json)

@@ -57,7 +57,7 @@ def parse_args():
         "--annotations",
         default=None,
         help="Path to annotations JSON file "
-        "(default: annotations-v0.1.0-20260510.json in project root)",
+        "(default: annotations-v0.1.0-20260510.json in annotations dir)",
     )
     parser.add_argument(
         "--reduced-video",
@@ -250,7 +250,7 @@ def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
     annotations_path = args.annotations or os.path.join(
-        project_root, "annotations-v0.1.0-20260510.json"
+        project_root, "annotations", "annotations-v0.1.0-20260510.json"
     )
 
     if not os.path.exists(annotations_path):
