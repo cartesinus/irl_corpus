@@ -232,14 +232,49 @@ def annotate_video(video_path: str, model: str, categories: dict) -> dict:
             response_mime_type="application/json",
             response_schema=schema,
             temperature=0.2,
+            max_output_tokens=65536,
         ),
     )
+
+    if response.text is None:
+        # Structured output with strict enum schema can return None.
+        # Log debug info and retry without response_schema.
+        finish_reason = "unknown"
+        if response.candidates:
+            finish_reason = str(response.candidates[0].finish_reason)
+        feedback = str(getattr(response, "prompt_feedback", "none"))
+        print(
+            f"  [warn] Schema-constrained response was None "
+            f"(finish_reason={finish_reason}, prompt_feedback={feedback}). "
+            "Retrying without response_schema...",
+            file=sys.stderr,
+        )
+        response = client.models.generate_content(
+            model=model,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                safety_settings=safety,
+                response_mime_type="application/json",
+                temperature=0.2,
+                max_output_tokens=65536,
+            ),
+        )
+
+    if response.text is None:
+        finish_reason = "unknown"
+        if response.candidates:
+            finish_reason = str(response.candidates[0].finish_reason)
+        feedback = str(getattr(response, "prompt_feedback", "none"))
+        raise RuntimeError(
+            f"Gemini returned empty response after retry. "
+            f"finish_reason={finish_reason}, prompt_feedback={feedback}"
+        )
 
     try:
         return json.loads(response.text)
     except Exception as exc:
         raise RuntimeError(
-            f"Failed to parse Gemini response: {exc}\nRaw: {response.text}"
+            f"Failed to parse Gemini response: {exc}\nRaw: {response.text[:500]}"
         ) from exc
 
 
@@ -275,9 +310,7 @@ def main():
 
     try:
         if os.path.exists(reduced_video):
-            print(
-                f"Reusing existing reduced video: {reduced_video}", file=sys.stderr
-            )
+            print(f"Reusing existing reduced video: {reduced_video}", file=sys.stderr)
         else:
             print(f"Reducing video to {args.fps} fps via ffmpeg...", file=sys.stderr)
             reduce_fps(args.video, args.fps, reduced_video)

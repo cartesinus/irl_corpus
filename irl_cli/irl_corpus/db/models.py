@@ -186,6 +186,14 @@ class Task(Base):
         DateTime(timezone=True), nullable=True
     )
     base_eaf_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    visual_annotated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    asr_transcribed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    visual_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    asr_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     superseded_by: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("tasks.id"), nullable=True
     )

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -13,11 +14,19 @@ def _split_wav(wav_path: Path, chunk_seconds: int, chunks_dir: Path) -> list[Pat
     pattern = str(chunks_dir / f"{wav_path.stem}_chunk_%03d.wav")
     subprocess.run(
         [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-            "-i", str(wav_path),
-            "-f", "segment",
-            "-segment_time", str(chunk_seconds),
-            "-c", "copy",
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(wav_path),
+            "-f",
+            "segment",
+            "-segment_time",
+            str(chunk_seconds),
+            "-c",
+            "copy",
             pattern,
         ],
         check=True,
@@ -76,15 +85,24 @@ def _post_chunk(
         },
         method="POST",
     )
-    with urllib.request.urlopen(req) as resp:  # nosec
-        return json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req) as resp:  # nosec
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:500]
+        raise urllib.error.HTTPError(
+            exc.url, exc.code, f"{exc.reason} — {body}", exc.headers, None
+        ) from None
 
 
 def _offset_segments(data: dict, offset_seconds: float) -> dict:
     """Add a time offset (in seconds) to all segment/word timestamps."""
+
     def shift(items: list, keys: list[str]) -> list:
-        return [{**item, **{k: item[k] + offset_seconds for k in keys if k in item}}
-                for item in items]
+        return [
+            {**item, **{k: item[k] + offset_seconds for k in keys if k in item}}
+            for item in items
+        ]
 
     segments = data.get("segments") or []
     shifted_segments = []
@@ -119,7 +137,7 @@ def transcribe_wav(
     api_url: str,
     *,
     lang: str = "fr",
-    translate_lang: str = "en",
+    translate_lang: str = "",
     translation_model: str = "gpt-4.1",
     chunk_seconds: int = 240,
     work_dir: Path | None = None,

@@ -186,6 +186,9 @@ def extract_segment_clip(
     subprocess.run(
         [
             "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
             "-y",
             "-ss",
             str(start_sec),
@@ -214,6 +217,9 @@ def extract_segment_wav(
     subprocess.run(
         [
             "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
             "-y",
             "-ss",
             str(start_sec),

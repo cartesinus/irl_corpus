@@ -12,7 +12,12 @@ from irl_corpus.cli.ctx import get_config, get_factory, whoami
 from irl_corpus.cli.utils import fmt_ms
 from irl_corpus.db import session_scope
 from irl_corpus.db.models import Segment as SegModel
-from irl_corpus.db.queries import get_chain, require_recording, require_segment
+from irl_corpus.db.queries import (
+    get_chain,
+    list_recordings,
+    require_recording,
+    require_segment,
+)
 from irl_corpus.pipeline import sequence
 
 app = typer.Typer(help="Manage segment sequences.", no_args_is_help=True)
@@ -26,32 +31,8 @@ _STATUS_STYLE = {
 }
 
 
-@app.command("list")
-def segment_list(
-    recording_id: str = typer.Argument(..., help="Recording ID."),
-    show_removed: bool = typer.Option(
-        False, "--removed", help="Also show removed segments."
-    ),
-):
-    """List the ordered segment chain for a recording."""
-    cfg = get_config()
-    factory = get_factory(cfg)
-
-    with session_scope(factory) as session:
-        rec = require_recording(session, recording_id)
-        chain = get_chain(session, recording_id)
-
-        removed = []
-        if show_removed:
-            removed = (
-                session.query(SegModel)
-                .filter_by(recording_id=recording_id, status="removed")
-                .all()
-            )
-
-    print(f"[bold]{rec.title}[/bold]  [dim]{rec.id}[/dim]")
-    print()
-
+def _segment_table(chain: list, removed: list) -> Table:
+    """Build a Rich table of segments."""
     table = Table(box=box.SIMPLE_HEAD)
     table.add_column("#", justify="right", style="dim")
     table.add_column("ID", style="cyan", no_wrap=True)
@@ -81,7 +62,6 @@ def segment_list(
             else seg.annotation_status,
             seg.notes or "",
         )
-
     for seg in removed:
         table.add_row(
             "-",
@@ -92,8 +72,44 @@ def segment_list(
             "",
             seg.notes or "",
         )
+    return table
 
-    print(table)
+
+@app.command("list")
+def segment_list(
+    recording_id: Optional[str] = typer.Argument(
+        None, help="Recording ID (omit for all)."
+    ),
+    show_removed: bool = typer.Option(
+        False, "--removed", help="Also show removed segments."
+    ),
+):
+    """List segments. Pass a recording ID to filter, or omit to show all recordings."""
+    cfg = get_config()
+    factory = get_factory(cfg)
+
+    with session_scope(factory) as session:
+        if recording_id:
+            recordings = [require_recording(session, recording_id)]
+        else:
+            recordings = list_recordings(session)
+
+        if not recordings:
+            print("[dim]No recordings found.[/dim]")
+            return
+
+        for rec in recordings:
+            chain = get_chain(session, rec.id)
+            removed = (
+                session.query(SegModel)
+                .filter_by(recording_id=rec.id, status="removed")
+                .all()
+                if show_removed
+                else []
+            )
+            print(f"[bold]{rec.title}[/bold]  [dim]{rec.id[:8]}[/dim]")
+            print(_segment_table(chain, removed))
+            print()
 
 
 @app.command("show")

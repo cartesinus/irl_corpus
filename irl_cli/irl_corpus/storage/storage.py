@@ -94,8 +94,18 @@ class Storage:
         """Return the full URL / path for a stored file."""
         return self._full(path)
 
+    def delete_tree(self, prefix: str) -> None:
+        """Recursively delete all files and directories under a prefix."""
+        full = self._full(prefix)
+        try:
+            self.filesystem.rm(full, recursive=True)
+        except FileNotFoundError:
+            pass
+
     def local_path(self, path: str) -> Path | None:
         """Return a local Path if this is a local storage backend, else None."""
-        if self.filesystem.protocol in ("file", "local"):
+        protocol = self.filesystem.protocol
+        protocols = (protocol,) if isinstance(protocol, str) else protocol
+        if any(p in ("file", "local") for p in protocols):
             return Path(self._full(path))
         return None

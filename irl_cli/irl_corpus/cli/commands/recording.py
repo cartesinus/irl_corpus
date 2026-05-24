@@ -18,6 +18,7 @@ from irl_corpus.db.queries import (
     list_recordings,
     require_recording,
 )
+from irl_corpus.pipeline import annotate as annotate_pipeline
 from irl_corpus.pipeline import auto as auto_pipeline
 from irl_corpus.pipeline import ingest
 from irl_corpus.pipeline import tasks as task_pipeline
@@ -25,6 +26,55 @@ from irl_corpus.pipeline import tasks as task_pipeline
 app = typer.Typer(help="Manage recordings.", no_args_is_help=True)
 
 _30_MIN_MS = 30 * 60 * 1000
+
+
+def _run_auto_annotation(
+    session,
+    task,
+    storage,
+    local_recording,
+    *,
+    transcribe_url,
+    lang,
+    translate_lang,
+    gemini_key,
+):
+    """Run visual + ASR annotation for a single task. Best-effort, prints status."""
+    seg_short = task.segment_id[:8]
+
+    if task.visual_annotated:
+        print(f"  [dim]visual {seg_short}: already done[/dim]")
+    elif gemini_key:
+        print(f"[cyan]Visual annotation[/cyan] {seg_short}…")
+        try:
+            annotate_pipeline.run_visual_annotation(
+                task, storage, local_recording, session=session
+            )
+            print("  [green]done[/green]")
+        except Exception as exc:  # pylint: disable=broad-except
+            print(f"  [yellow]failed:[/yellow] {exc}")
+    else:
+        print(f"  [dim]visual {seg_short}: skipped (GEMINI_API_KEY not set)[/dim]")
+
+    if task.asr_transcribed:
+        print(f"  [dim]ASR {seg_short}: already done[/dim]")
+    elif transcribe_url:
+        print(f"[cyan]Transcription[/cyan] {seg_short}…")
+        try:
+            annotate_pipeline.run_transcription(
+                task,
+                storage,
+                local_recording,
+                transcribe_url,
+                lang=lang,
+                translate_lang=translate_lang,
+                session=session,
+            )
+            print("  [green]done[/green]")
+        except Exception as exc:  # pylint: disable=broad-except
+            print(f"  [yellow]failed:[/yellow] {exc}")
+    else:
+        print(f"  [dim]ASR {seg_short}: skipped (transcribe_url not configured)[/dim]")
 
 
 def _fmt_duration(millis: int | None) -> str:
@@ -55,6 +105,17 @@ def recording_add(  # pylint: disable=too-many-locals,too-many-statements
     create_eaf: bool = typer.Option(
         True, "--eaf/--no-eaf", help="Create base EAF files for each segment."
     ),
+    auto_annotate: bool = typer.Option(
+        True,
+        "--auto-annotate/--no-auto-annotate",
+        help="Run visual + transcription auto-annotation after ingestion (default: on).",
+    ),
+    lang: str = typer.Option("fr", "--lang", help="Source language for transcription."),
+    translate_lang: str = typer.Option(
+        "",
+        "--translate-lang",
+        help="Translation target language (empty = no translation).",
+    ),
 ):
     """Upload a recording, auto-split into segments, and create base EAF files.
 
@@ -62,6 +123,7 @@ def recording_add(  # pylint: disable=too-many-locals,too-many-statements
     MPEG-TS (.ts) files are transcoded to MP4 (stream-copy) before upload.
     Recordings longer than --segment-ms are split into fixed-length segments.
     A base EAF (empty tiers, media link) is stored for each content segment.
+    Visual (Gemini) and ASR annotation run automatically if configured.
     """
     cfg = get_config()
     factory = get_factory(cfg)
@@ -181,6 +243,31 @@ def recording_add(  # pylint: disable=too-many-locals,too-many-statements
                     except Exception as exc:  # pylint: disable=broad-except
                         print(f"  [red]EAF failed for {seg.id[:8]}:[/red] {exc}")
 
+            # Auto-annotation (best-effort — failures are warnings, not errors)
+            if auto_annotate and create_eaf:
+                local_recording = storage.local_path(rec.storage_path)
+                if local_recording is None:
+                    print(
+                        "[yellow]Auto-annotation skipped — only supported for local storage.[/yellow]"
+                    )
+                else:
+                    import os  # pylint: disable=import-outside-toplevel
+
+                    transcribe_url = cfg.services.transcribe_url
+                    for task in new_tasks:
+                        if task.base_eaf_path is None:
+                            continue
+                        _run_auto_annotation(
+                            session,
+                            task,
+                            storage,
+                            local_recording,
+                            transcribe_url=transcribe_url,
+                            lang=lang,
+                            translate_lang=translate_lang,
+                            gemini_key=os.environ.get("GEMINI_API_KEY"),
+                        )
+
     finally:
         if tmp_dir:
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -237,6 +324,39 @@ def recording_show(
         print(f"  segments: {len(rec.segments)}")
 
 
+@app.command("delete")
+def recording_delete(
+    recording_id: str = typer.Argument(..., help="Recording ID (or prefix)."),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation."),
+):
+    """Hard-delete a recording, all its segments, tasks, and storage files.
+
+    This is irreversible. Use --force to skip the confirmation prompt.
+    """
+    cfg = get_config()
+    factory = get_factory(cfg)
+    storage = get_storage(cfg)
+
+    try:
+        with session_scope(factory) as session:
+            rec = require_recording(session, recording_id)
+            n_segs = len(rec.segments)
+
+            if not force:
+                typer.confirm(
+                    f"Delete recording '{rec.title}' ({rec.id[:8]}) "
+                    f"and all {n_segs} segment(s) / tasks / files?",
+                    abort=True,
+                )
+
+            ingest.delete_recording(session, storage, rec.id)
+    except ValueError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    print(f"[red]Deleted[/red] recording [bold]{rec.title}[/bold] ({rec.id[:8]})")
+
+
 @app.command("split")
 def recording_split(
     recording_id: str = typer.Argument(..., help="Recording ID."),
@@ -259,18 +379,18 @@ def recording_split(
     with session_scope(factory) as session:
         rec = require_recording(session, recording_id)
         segments = ingest.split_into_segments(
-            session, recording_id, user_name=user, segment_duration_ms=duration_ms
+            session, rec.id, user_name=user, segment_duration_ms=duration_ms
         )
         content_segs = [seg for seg in segments if seg.type == "content"]
         print(
             f"[green]Created {len(content_segs)} segment(s)[/green] "
-            f"from recording {recording_id[:8]}"
+            f"from recording {rec.id[:8]}"
         )
 
         schema = get_current_schema(session)
         new_tasks = []
         if create_tasks and schema:
-            new_tasks = task_pipeline.create_tasks_for_recording(session, recording_id)
+            new_tasks = task_pipeline.create_tasks_for_recording(session, rec.id)
             print(f"[green]Created {len(new_tasks)} annotation task(s)[/green]")
         elif create_tasks and not schema:
             print("[yellow]No current schema — skipping task creation.[/yellow]")

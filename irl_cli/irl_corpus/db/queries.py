@@ -61,12 +61,18 @@ def list_schemas(session: Session) -> list[AnnotationSchema]:
 
 
 def get_recording(session: Session, recording_id: str) -> Recording | None:
-    """Return a Recording by ID, or None."""
-    return session.get(Recording, recording_id)
+    """Return a Recording by exact ID or unique prefix, or None."""
+    rec = session.get(Recording, recording_id)
+    if rec:
+        return rec
+    matches = (
+        session.query(Recording).filter(Recording.id.like(f"{recording_id}%")).all()
+    )
+    return matches[0] if len(matches) == 1 else None
 
 
 def require_recording(session: Session, recording_id: str) -> Recording:
-    """Return a Recording by ID, raising ValueError if not found."""
+    """Return a Recording by ID or prefix, raising ValueError if not found."""
     rec = get_recording(session, recording_id)
     if not rec:
         raise ValueError(f"Recording '{recording_id}' not found.")
@@ -82,12 +88,16 @@ def list_recordings(session: Session) -> list[Recording]:
 
 
 def get_segment(session: Session, segment_id: str) -> Segment | None:
-    """Return a Segment by ID, or None."""
-    return session.get(Segment, segment_id)
+    """Return a Segment by exact ID or unique prefix, or None."""
+    seg = session.get(Segment, segment_id)
+    if seg:
+        return seg
+    matches = session.query(Segment).filter(Segment.id.like(f"{segment_id}%")).all()
+    return matches[0] if len(matches) == 1 else None
 
 
 def require_segment(session: Session, segment_id: str) -> Segment:
-    """Return a Segment by ID, raising ValueError if not found."""
+    """Return a Segment by ID or prefix, raising ValueError if not found."""
     seg = get_segment(session, segment_id)
     if not seg:
         raise ValueError(f"Segment '{segment_id}' not found.")
@@ -127,12 +137,16 @@ def get_chain(session: Session, recording_id: str) -> list[Segment]:
 
 
 def get_task(session: Session, task_id: str) -> Task | None:
-    """Return a Task by ID, or None."""
-    return session.get(Task, task_id)
+    """Return a Task by exact ID or unique prefix, or None."""
+    task = session.get(Task, task_id)
+    if task:
+        return task
+    matches = session.query(Task).filter(Task.id.like(f"{task_id}%")).all()
+    return matches[0] if len(matches) == 1 else None
 
 
 def require_task(session: Session, task_id: str) -> Task:
-    """Return a Task by ID, raising ValueError if not found."""
+    """Return a Task by ID or prefix, raising ValueError if not found."""
     task = get_task(session, task_id)
     if not task:
         raise ValueError(f"Task '{task_id}' not found.")

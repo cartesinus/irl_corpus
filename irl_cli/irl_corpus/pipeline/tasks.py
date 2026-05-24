@@ -138,13 +138,13 @@ def save_partial(  # pylint: disable=too-many-arguments
     user = require_user(session, user_name)
 
     save_num = (
-        session.query(TaskSave).filter_by(task_id=task_id, is_final=False).count() + 1
+        session.query(TaskSave).filter_by(task_id=task.id, is_final=False).count() + 1
     )
-    storage_path = f"tasks/{task_id}/saves/{save_num:03d}_{_ts()}_{user.name}.eaf"
+    storage_path = f"tasks/{task.id}/saves/{save_num:03d}_{_ts()}_{user.name}.eaf"
     storage.put(eaf_file, storage_path)
 
     task_save = TaskSave(
-        task_id=task_id,
+        task_id=task.id,
         saved_by=user.id,
         eaf_path=storage_path,
         is_final=False,
@@ -176,17 +176,17 @@ def finish_annotation(  # pylint: disable=too-many-arguments
 
     if task.type != "annotation":
         raise ValueError(
-            f"Task {task_id} is type='{task.type}', expected 'annotation'."
+            f"Task {task.id} is type='{task.type}', expected 'annotation'."
         )
     if task.status not in ("pending", "in_progress"):
-        raise ValueError(f"Task {task_id} has status='{task.status}', cannot finish.")
+        raise ValueError(f"Task {task.id} has status='{task.status}', cannot finish.")
 
-    storage_path = f"tasks/{task_id}/saves/final_{_ts()}_{user.name}.eaf"
+    storage_path = f"tasks/{task.id}/saves/final_{_ts()}_{user.name}.eaf"
     storage.put(eaf_file, storage_path)
 
     session.add(
         TaskSave(
-            task_id=task_id,
+            task_id=task.id,
             saved_by=user.id,
             eaf_path=storage_path,
             is_final=True,
@@ -229,10 +229,10 @@ def approve_validation(
 
     if task.type != "validation":
         raise ValueError(
-            f"Task {task_id} is type='{task.type}', expected 'validation'."
+            f"Task {task.id} is type='{task.type}', expected 'validation'."
         )
     if task.status not in ("pending", "in_progress"):
-        raise ValueError(f"Task {task_id} has status='{task.status}', cannot approve.")
+        raise ValueError(f"Task {task.id} has status='{task.status}', cannot approve.")
 
     task.status = "approved"
     task.assigned_to = user.id
@@ -265,17 +265,17 @@ def reject_validation(  # pylint: disable=too-many-arguments
 
     if task.type != "validation":
         raise ValueError(
-            f"Task {task_id} is type='{task.type}', expected 'validation'."
+            f"Task {task.id} is type='{task.type}', expected 'validation'."
         )
     if task.status not in ("pending", "in_progress"):
-        raise ValueError(f"Task {task_id} has status='{task.status}', cannot reject.")
+        raise ValueError(f"Task {task.id} has status='{task.status}', cannot reject.")
 
-    storage_path = f"tasks/{task_id}/saves/rejected_{_ts()}_{user.name}.eaf"
+    storage_path = f"tasks/{task.id}/saves/rejected_{_ts()}_{user.name}.eaf"
     storage.put(eaf_file, storage_path)
 
     session.add(
         TaskSave(
-            task_id=task_id,
+            task_id=task.id,
             saved_by=user.id,
             eaf_path=storage_path,
             is_final=True,

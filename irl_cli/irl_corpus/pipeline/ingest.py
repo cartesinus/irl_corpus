@@ -5,9 +5,10 @@ import json
 import subprocess
 from pathlib import Path
 
+from sqlalchemy import delete as sql_delete, select, text, update as sql_update
 from sqlalchemy.orm import Session
 
-from irl_corpus.db.models import Recording, Segment, SegmentEvent
+from irl_corpus.db.models import Recording, Segment, SegmentEvent, Task, TaskSave
 from irl_corpus.db.queries import get_user, require_recording
 from irl_corpus.storage import Storage
 
@@ -52,7 +53,18 @@ def transcode_to_mp4(
     Raises subprocess.CalledProcessError if ffmpeg fails.
     """
     subprocess.run(
-        ["ffmpeg", "-i", str(src), "-c", "copy", "-y", str(dst)],
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(src),
+            "-c",
+            "copy",
+            "-y",
+            str(dst),
+        ],
         check=True,
     )
     return dst
@@ -153,9 +165,70 @@ def split_into_segments(
         segments.append(seg)
         start = end
 
-    rec.status = "processing"
+    rec.status = "ready"
     session.flush()
     return segments
+
+
+def delete_recording(
+    session: Session,
+    storage: Storage,
+    recording_id: str,
+) -> Recording:
+    """Hard-delete a recording and all associated data from DB and storage.
+
+    Deletion order:
+      TaskSaves → Tasks → SegmentEvents → Segments (FKs cleared) → Recording
+      Storage:  tasks/<task_id>/ → segments/<seg_id>/ → recordings/<rec_id>/
+    """
+    rec = require_recording(session, recording_id)
+    rid = rec.id
+
+    # Collect IDs for storage cleanup before deleting
+    seg_ids = [
+        row[0]
+        for row in session.execute(
+            select(Segment.id).where(Segment.recording_id == rid)
+        )
+    ]
+    task_ids = (
+        [
+            row[0]
+            for row in session.execute(
+                select(Task.id).where(Task.segment_id.in_(seg_ids))
+            )
+        ]
+        if seg_ids
+        else []
+    )
+
+    # Delete in dependency order using Core expressions (avoids ORM identity-map conflicts)
+    if task_ids:
+        session.execute(sql_delete(TaskSave).where(TaskSave.task_id.in_(task_ids)))
+        session.execute(sql_delete(Task).where(Task.id.in_(task_ids)))
+    if seg_ids:
+        session.execute(
+            sql_delete(SegmentEvent).where(SegmentEvent.segment_id.in_(seg_ids))
+        )
+        session.execute(
+            sql_update(Segment)
+            .where(Segment.recording_id == rid)
+            .values(
+                prev_segment_id=None, next_segment_id=None, split_from_segment_id=None
+            )
+        )
+        session.execute(sql_delete(Segment).where(Segment.recording_id == rid))
+    session.execute(sql_delete(Recording).where(Recording.id == rid))
+    session.flush()
+
+    # Delete storage files
+    for task_id in task_ids:
+        storage.delete_tree(f"tasks/{task_id}")
+    for seg_id in seg_ids:
+        storage.delete_tree(f"segments/{seg_id}")
+    storage.delete_tree(f"recordings/{rec.id}")
+
+    return rec
 
 
 def set_recording_duration(

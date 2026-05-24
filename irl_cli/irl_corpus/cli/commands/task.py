@@ -127,6 +127,18 @@ def task_show(
             print(f"  completed:  {task.completed_at.strftime('%Y-%m-%d %H:%M UTC')}")
         if task.base_eaf_path:
             print(f"  base EAF:   {task.base_eaf_path}")
+        visual_state = (
+            "[green]done[/green]" if task.visual_annotated else "[dim]pending[/dim]"
+        )
+        asr_state = (
+            "[green]done[/green]" if task.asr_transcribed else "[dim]pending[/dim]"
+        )
+        print(f"  visual:     {visual_state}")
+        if task.visual_error:
+            print(f"    [red]error:[/red] {task.visual_error}")
+        print(f"  ASR:        {asr_state}")
+        if task.asr_error:
+            print(f"    [red]error:[/red] {task.asr_error}")
         if task.superseded_by:
             print(f"  [dim]superseded by: {task.superseded_by[:8]}[/dim]")
 
