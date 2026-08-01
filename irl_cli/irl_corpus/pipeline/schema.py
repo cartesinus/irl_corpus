@@ -1,4 +1,5 @@
 """Annotation schema import and management."""
+
 from __future__ import annotations
 
 import json

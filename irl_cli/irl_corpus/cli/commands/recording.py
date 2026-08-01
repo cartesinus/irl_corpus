@@ -286,7 +286,8 @@ def recording_add(  # pylint: disable=too-many-locals,too-many-statements
                 local_recording = storage.local_path(rec.storage_path)
                 if local_recording is None:
                     print(
-                        "[yellow]Auto-annotation skipped — only supported for local storage.[/yellow]"
+                        "[yellow]Auto-annotation skipped — "
+                        "only supported for local storage.[/yellow]"
                     )
                 else:
                     import os  # pylint: disable=import-outside-toplevel

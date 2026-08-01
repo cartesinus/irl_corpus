@@ -4,6 +4,7 @@ Works transparently for:
 - Local filesystem  (backend="local", root="/mnt/secure_hdd/twitch")
 - OVH / S3-compatible (backend="s3", bucket="...", endpoint="...")
 """
+
 from __future__ import annotations
 
 from pathlib import Path

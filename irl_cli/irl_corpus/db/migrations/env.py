@@ -1,4 +1,5 @@
 """Alembic migration environment configuration."""
+
 # pylint: disable=no-member
 from logging.config import fileConfig
 

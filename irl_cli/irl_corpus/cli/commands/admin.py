@@ -1,4 +1,5 @@
 """CLI commands: irl admin ..."""
+
 from __future__ import annotations
 
 import typer

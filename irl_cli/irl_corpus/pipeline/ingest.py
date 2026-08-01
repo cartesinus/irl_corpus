@@ -1,11 +1,12 @@
 """Recording upload and segment splitting."""
+
 from __future__ import annotations
 
 import json
 import subprocess
 from pathlib import Path
 
-from sqlalchemy import delete as sql_delete, select, text, update as sql_update
+from sqlalchemy import delete as sql_delete, select, update as sql_update
 from sqlalchemy.orm import Session
 
 from irl_corpus.db.models import Recording, Segment, SegmentEvent, Task, TaskSave

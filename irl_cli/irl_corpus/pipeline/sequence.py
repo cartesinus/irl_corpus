@@ -1,4 +1,5 @@
 """Segment sequence operations: split, remove, insert gap."""
+
 from __future__ import annotations
 
 import json

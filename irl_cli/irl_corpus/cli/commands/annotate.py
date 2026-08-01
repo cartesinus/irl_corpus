@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
 import typer
 from rich import print  # pylint: disable=redefined-builtin
 
-import os
-
 from irl_corpus.cli.ctx import get_config, get_factory, get_storage
 from irl_corpus.db import session_scope
-from irl_corpus.db.models import Recording, Task
+from irl_corpus.db.models import Recording
 from irl_corpus.db.queries import list_tasks, require_recording, require_task
 from irl_corpus.pipeline import annotate as annotate_pipeline
 
@@ -287,9 +286,10 @@ def annotate_auto(
                 print(f"  [dim]visual {task.segment_id[:8]}: already done[/dim]")
             elif task.visual_error and not force:
                 print(
-                    f"  [yellow]visual {task.segment_id[:8]}: last error:[/yellow] {task.visual_error}"
+                    f"  [yellow]visual {task.segment_id[:8]}: last error:[/yellow] "
+                    f"{task.visual_error}"
                 )
-                print(f"    (run with --force to retry)")
+                print("    (run with --force to retry)")
             elif gemini_key:
                 print(f"[cyan]Visual[/cyan] {task.segment_id[:8]}…")
                 try:
@@ -311,7 +311,7 @@ def annotate_auto(
                 print(
                     f"  [yellow]ASR {task.segment_id[:8]}: last error:[/yellow] {task.asr_error}"
                 )
-                print(f"    (run with --force to retry)")
+                print("    (run with --force to retry)")
             elif elevenlabs_key:
                 print(f"[cyan]ASR (Scribe v2)[/cyan] {task.segment_id[:8]}…")
                 try:

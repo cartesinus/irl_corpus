@@ -17,7 +17,7 @@ API_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 DEFAULT_MODEL_ID = "scribe_v2"
 
 
-def _post_file(  # pylint: disable=too-many-arguments
+def _post_file(  # pylint: disable=too-many-arguments,too-many-locals
     audio_path: Path,
     api_key: str,
     *,
@@ -124,7 +124,6 @@ def _group_into_segments(words: list[dict], max_gap_seconds: float) -> list[dict
         (e.g. a run of only audio-event tokens) are dropped.
     """
     segments: list[dict] = []
-    current: dict | None = None
 
     for word in words:
         if word.get("type") == "audio_event":
@@ -135,14 +134,15 @@ def _group_into_segments(words: list[dict], max_gap_seconds: float) -> list[dict
         end = float(word.get("end", start))
         speaker = word.get("speaker_id")
 
-        if current is not None:
-            gap = start - current["end"]
-        if current is None or speaker != current["speaker"] or gap > max_gap_seconds:
-            current = {"start": start, "end": end, "text": text, "speaker": speaker}
-            segments.append(current)
+        starts_new_segment = not segments or (
+            speaker != segments[-1]["speaker"]
+            or start - segments[-1]["end"] > max_gap_seconds
+        )
+        if starts_new_segment:
+            segments.append({"start": start, "end": end, "text": text, "speaker": speaker})
         else:
-            current["text"] += text
-            current["end"] = end
+            segments[-1]["text"] += text
+            segments[-1]["end"] = end
 
     for seg in segments:
         seg["text"] = seg["text"].strip()

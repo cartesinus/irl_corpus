@@ -8,6 +8,7 @@ The base EAF is an ELAN annotation file pre-populated with:
 Automatic model-based annotation (ASR, scene classification, etc.) is called
 from here and writes into the appropriate tiers before the base EAF is stored.
 """
+
 from __future__ import annotations
 
 import json
@@ -88,16 +89,16 @@ def build_base_eaf(
     }
     ET.SubElement(header, "MEDIA_DESCRIPTOR", media_descriptor_attrs)
 
-    ET.SubElement(
-        header, "PROPERTY", {"NAME": "URN"}
-    ).text = f"urn:irl-corpus:segment:{segment.id}"
+    ET.SubElement(header, "PROPERTY", {"NAME": "URN"}).text = (
+        f"urn:irl-corpus:segment:{segment.id}"
+    )
     ET.SubElement(header, "PROPERTY", {"NAME": "lastUsedAnnotationId"}).text = "0"
-    ET.SubElement(
-        header, "PROPERTY", {"NAME": "irl_corpus_segment_id"}
-    ).text = segment.id
-    ET.SubElement(
-        header, "PROPERTY", {"NAME": "irl_corpus_schema_version"}
-    ).text = json.loads(schema.content).get("version", "")
+    ET.SubElement(header, "PROPERTY", {"NAME": "irl_corpus_segment_id"}).text = (
+        segment.id
+    )
+    ET.SubElement(header, "PROPERTY", {"NAME": "irl_corpus_schema_version"}).text = (
+        json.loads(schema.content).get("version", "")
+    )
 
     ET.SubElement(root, "TIME_ORDER")
 

@@ -1,4 +1,5 @@
 """Shared CLI context: config, session factory, storage."""
+
 from __future__ import annotations
 
 from functools import lru_cache

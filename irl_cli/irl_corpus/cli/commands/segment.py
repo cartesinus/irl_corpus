@@ -1,4 +1,5 @@
 """CLI commands: irl segment ..."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -57,9 +58,11 @@ def _segment_table(chain: list, removed: list) -> Table:
             seg_type,
             f"{fmt_ms(seg.start_ms)} – {fmt_ms(seg.end_ms)}",
             dur_str,
-            f"[{style}]{seg.annotation_status}[/{style}]"
-            if style
-            else seg.annotation_status,
+            (
+                f"[{style}]{seg.annotation_status}[/{style}]"
+                if style
+                else seg.annotation_status
+            ),
             seg.notes or "",
         )
     for seg in removed:

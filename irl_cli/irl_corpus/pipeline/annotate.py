@@ -271,7 +271,7 @@ def _speaker_turn_values(segments: list[dict]) -> dict[str | None, str]:
     return mapping
 
 
-def run_transcription_elevenlabs(  # pylint: disable=too-many-arguments,too-many-locals
+def run_transcription_elevenlabs(  # pylint: disable=too-many-arguments,too-many-locals,too-many-statements
     task: Task,
     storage: Storage,
     local_recording: Path,
