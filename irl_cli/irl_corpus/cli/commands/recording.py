@@ -1,4 +1,5 @@
 """CLI commands: irl recording ..."""
+
 from __future__ import annotations
 
 import shutil
@@ -28,7 +29,7 @@ app = typer.Typer(help="Manage recordings.", no_args_is_help=True)
 _30_MIN_MS = 30 * 60 * 1000
 
 
-def _run_auto_annotation(
+def _run_auto_annotation(  # pylint: disable=too-many-arguments
     session,
     task,
     storage,
@@ -38,8 +39,28 @@ def _run_auto_annotation(
     lang,
     translate_lang,
     gemini_key,
+    elevenlabs_key,
 ):
-    """Run visual + ASR annotation for a single task. Best-effort, prints status."""
+    """Run visual + ASR annotation for a single task.
+
+    Best-effort: exceptions from each step are caught and printed as
+    warnings so one failing step doesn't abort the others.
+
+    Args:
+        session: Active DB session; task flags are updated on success/failure.
+        task: The annotation task to process.
+        storage: Storage backend for reading/writing the task's EAF file.
+        local_recording: Local path to the recording the task belongs to.
+        transcribe_url: Legacy ASR API endpoint, or ``None`` to skip it.
+        lang: Source language code for ASR.
+        translate_lang: Translation target language for the legacy engine
+            (ignored by the elevenlabs engine).
+        gemini_key: ``GEMINI_API_KEY`` value, or ``None`` to skip visual
+            annotation.
+        elevenlabs_key: ``ELEVENLABS_API_KEY`` value. When set, ASR uses the
+            ElevenLabs Scribe v2 engine (transcribe + diarize + VAD in one
+            call) in preference to ``transcribe_url``.
+    """
     seg_short = task.segment_id[:8]
 
     if task.visual_annotated:
@@ -58,6 +79,20 @@ def _run_auto_annotation(
 
     if task.asr_transcribed:
         print(f"  [dim]ASR {seg_short}: already done[/dim]")
+    elif elevenlabs_key:
+        print(f"[cyan]Transcription (Scribe v2)[/cyan] {seg_short}…")
+        try:
+            annotate_pipeline.run_transcription_elevenlabs(
+                task,
+                storage,
+                local_recording,
+                elevenlabs_key,
+                language_code=lang,
+                session=session,
+            )
+            print("  [green]done[/green]")
+        except Exception as exc:  # pylint: disable=broad-except
+            print(f"  [yellow]failed:[/yellow] {exc}")
     elif transcribe_url:
         print(f"[cyan]Transcription[/cyan] {seg_short}…")
         try:
@@ -74,7 +109,10 @@ def _run_auto_annotation(
         except Exception as exc:  # pylint: disable=broad-except
             print(f"  [yellow]failed:[/yellow] {exc}")
     else:
-        print(f"  [dim]ASR {seg_short}: skipped (transcribe_url not configured)[/dim]")
+        print(
+            f"  [dim]ASR {seg_short}: skipped "
+            "(neither ELEVENLABS_API_KEY nor transcribe_url configured)[/dim]"
+        )
 
 
 def _fmt_duration(millis: int | None) -> str:
@@ -266,6 +304,7 @@ def recording_add(  # pylint: disable=too-many-locals,too-many-statements
                             lang=lang,
                             translate_lang=translate_lang,
                             gemini_key=os.environ.get("GEMINI_API_KEY"),
+                            elevenlabs_key=os.environ.get("ELEVENLABS_API_KEY"),
                         )
 
     finally:

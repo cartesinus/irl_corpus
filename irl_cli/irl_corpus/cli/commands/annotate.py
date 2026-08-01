@@ -1,4 +1,5 @@
 """CLI commands: irl annotate ..."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -100,21 +101,38 @@ def annotate_visual(
 
 
 @app.command("transcribe")
-def annotate_transcribe(
+def annotate_transcribe(  # pylint: disable=too-many-arguments
     task_id: str = typer.Argument(..., help="Task ID to transcribe."),
+    engine: str = typer.Option(
+        "legacy",
+        "--engine",
+        help=(
+            "ASR engine: 'legacy' (self-hosted WhisperX-style API) or "
+            "'elevenlabs' (Scribe v2 batch: transcribe + diarize + VAD in "
+            "one call)."
+        ),
+    ),
     lang: str = typer.Option("fr", "--lang", "-l", help="Source language code."),
     translate_lang: str = typer.Option(
         "",
         "--translate-lang",
-        help="Translation target language (empty = no translation).",
+        help="Translation target language, legacy engine only (empty = no translation).",
     ),
     chunk_seconds: int = typer.Option(
-        240, "--chunk-seconds", help="Audio chunk length in seconds."
+        240,
+        "--chunk-seconds",
+        help="Audio chunk length in seconds (legacy engine only).",
     ),
     api_url: Optional[str] = typer.Option(
         None,
         "--api-url",
-        help="Transcription API endpoint (overrides [services] transcribe_url in irl.toml).",
+        help="Transcription API endpoint, legacy engine only "
+        "(overrides [services] transcribe_url in irl.toml).",
+    ),
+    num_speakers: Optional[int] = typer.Option(
+        None,
+        "--num-speakers",
+        help="Maximum number of speakers to detect (elevenlabs engine only).",
     ),
     clear_existing: bool = typer.Option(
         True, "--clear/--no-clear", help="Clear existing transcript tiers first."
@@ -122,22 +140,33 @@ def annotate_transcribe(
 ):
     """Run ASR transcription on a task's segment and inject into EAF.
 
-    Requires ffmpeg on PATH and access to the transcription API.
-    Populates the 'transcript' and 'translation' tiers.
+    Requires ffmpeg on PATH. The legacy engine populates the 'transcript'
+    and 'translation' tiers via the configured transcribe_url; the
+    elevenlabs engine populates 'transcript' and 'speaker_turn' via the
+    ElevenLabs Scribe v2 batch API (requires ELEVENLABS_API_KEY).
     """
     cfg = get_config()
     factory = get_factory(cfg)
     storage = get_storage(cfg)
 
-    resolved_api_url = api_url or cfg.services.transcribe_url
-    if not resolved_api_url:
-        print(
-            "[red]No transcription URL configured.[/red]\n"
-            "Set it in irl.toml:\n"
-            "  [services]\n"
-            '  transcribe_url = "https://..."\n'
-            "or via environment variable: IRL_TRANSCRIBE_URL"
-        )
+    if engine == "elevenlabs":
+        api_key = os.environ.get("ELEVENLABS_API_KEY")
+        if not api_key:
+            print("[red]ELEVENLABS_API_KEY environment variable is not set.[/red]")
+            raise typer.Exit(1)
+    elif engine == "legacy":
+        resolved_api_url = api_url or cfg.services.transcribe_url
+        if not resolved_api_url:
+            print(
+                "[red]No transcription URL configured.[/red]\n"
+                "Set it in irl.toml:\n"
+                "  [services]\n"
+                '  transcribe_url = "https://..."\n'
+                "or via environment variable: IRL_TRANSCRIBE_URL"
+            )
+            raise typer.Exit(1)
+    else:
+        print(f"[red]Unknown engine '{engine}'. Use 'legacy' or 'elevenlabs'.[/red]")
         raise typer.Exit(1)
 
     with session_scope(factory) as session:
@@ -153,21 +182,33 @@ def annotate_transcribe(
             )
             raise typer.Exit(1)
 
-        print(
-            f"[cyan]Transcribing[/cyan] segment {seg.id[:8]} "
-            f"(lang={lang}, translate→{translate_lang})…"
-        )
         try:
-            annotate_pipeline.run_transcription(
-                task,
-                storage,
-                local_recording,
-                resolved_api_url,
-                lang=lang,
-                translate_lang=translate_lang,
-                chunk_seconds=chunk_seconds,
-                clear_existing=clear_existing,
-            )
+            if engine == "elevenlabs":
+                print(f"[cyan]Transcribing (Scribe v2)[/cyan] segment {seg.id[:8]}…")
+                annotate_pipeline.run_transcription_elevenlabs(
+                    task,
+                    storage,
+                    local_recording,
+                    api_key,
+                    language_code=lang,
+                    num_speakers=num_speakers,
+                    clear_existing=clear_existing,
+                )
+            else:
+                print(
+                    f"[cyan]Transcribing[/cyan] segment {seg.id[:8]} "
+                    f"(lang={lang}, translate→{translate_lang})…"
+                )
+                annotate_pipeline.run_transcription(
+                    task,
+                    storage,
+                    local_recording,
+                    resolved_api_url,
+                    lang=lang,
+                    translate_lang=translate_lang,
+                    chunk_seconds=chunk_seconds,
+                    clear_existing=clear_existing,
+                )
         except Exception as exc:  # pylint: disable=broad-except
             print(f"[red]Transcription failed:[/red] {exc}")
             raise typer.Exit(1) from exc
@@ -202,6 +243,7 @@ def annotate_auto(
 
     resolved_api_url = cfg.services.transcribe_url
     gemini_key = os.environ.get("GEMINI_API_KEY")
+    elevenlabs_key = os.environ.get("ELEVENLABS_API_KEY")
 
     with session_scope(factory) as session:
         try:
@@ -270,6 +312,20 @@ def annotate_auto(
                     f"  [yellow]ASR {task.segment_id[:8]}: last error:[/yellow] {task.asr_error}"
                 )
                 print(f"    (run with --force to retry)")
+            elif elevenlabs_key:
+                print(f"[cyan]ASR (Scribe v2)[/cyan] {task.segment_id[:8]}…")
+                try:
+                    annotate_pipeline.run_transcription_elevenlabs(
+                        task,
+                        storage,
+                        local_recording,
+                        elevenlabs_key,
+                        language_code=lang,
+                        session=session,
+                    )
+                    print("  [green]done[/green]")
+                except Exception as exc:  # pylint: disable=broad-except
+                    print(f"  [yellow]failed:[/yellow] {exc}")
             elif resolved_api_url:
                 print(f"[cyan]ASR[/cyan] {task.segment_id[:8]}…")
                 try:
@@ -287,5 +343,6 @@ def annotate_auto(
                     print(f"  [yellow]failed:[/yellow] {exc}")
             else:
                 print(
-                    f"  [dim]ASR {task.segment_id[:8]}: skipped (transcribe_url not configured)[/dim]"
+                    f"  [dim]ASR {task.segment_id[:8]}: skipped "
+                    "(neither ELEVENLABS_API_KEY nor transcribe_url configured)[/dim]"
                 )

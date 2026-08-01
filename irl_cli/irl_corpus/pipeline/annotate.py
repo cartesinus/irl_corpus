@@ -1,4 +1,5 @@
 """Auto-annotation pipeline: visual (Gemini) and ASR transcription."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from irl_corpus.db.models import Task
 from irl_corpus.pipeline import auto as auto_pipeline
+from irl_corpus.pipeline import elevenlabs_stt
 from irl_corpus.pipeline import transcribe as transcribe_pipeline
 from irl_corpus.storage import Storage
 
@@ -224,6 +226,154 @@ def run_transcription(
                         end_slot,
                     )
                     next_ann_id += 1
+
+            add_mod.indent_xml(root)
+            annotated_eaf = tmp / "transcribed.eaf"
+            tree.write(str(annotated_eaf), encoding="UTF-8", xml_declaration=True)
+
+            storage.put(annotated_eaf, task.base_eaf_path)
+
+        if session is not None:
+            task.asr_transcribed = True
+            task.asr_error = None
+            session.flush()
+    except Exception:
+        if session is not None:
+            import sys  # pylint: disable=import-outside-toplevel
+
+            task.asr_error = str(sys.exc_info()[1])
+            session.flush()
+        raise
+
+
+def _speaker_turn_values(segments: list[dict]) -> dict[str | None, str]:
+    """Map raw Scribe v2 speaker ids to the schema's speaker_turn enum.
+
+    The pilot schema only distinguishes speaker_1 / speaker_2 / unknown (see
+    the annotations JSON note: "Do not aim for perfect diarization in the
+    pilot"), so the first two distinct speakers encountered win those slots
+    and any further speakers fall back to "unknown".
+
+    Args:
+        segments: Segment dicts as returned by
+            ``elevenlabs_stt.transcribe_wav``, each with a ``speaker`` key.
+
+    Returns:
+        A dict mapping each raw speaker id (as seen in ``segments``) to one
+        of ``"speaker_1"``, ``"speaker_2"``, or ``"unknown"``.
+    """
+    mapping: dict[str | None, str] = {}
+    slots = ["speaker_1", "speaker_2"]
+    for seg in segments:
+        speaker = seg.get("speaker")
+        if speaker not in mapping:
+            mapping[speaker] = slots.pop(0) if slots else "unknown"
+    return mapping
+
+
+def run_transcription_elevenlabs(  # pylint: disable=too-many-arguments,too-many-locals
+    task: Task,
+    storage: Storage,
+    local_recording: Path,
+    api_key: str,
+    *,
+    language_code: str = "",
+    num_speakers: int | None = None,
+    clear_existing: bool = True,
+    session: Session | None = None,
+) -> None:
+    """Transcribe and diarize a task's segment with ElevenLabs Scribe v2.
+
+    A single batch call covers ASR, non-speech filtering, and speaker
+    diarization, replacing the separate transcribe/VAD/diarize steps of the
+    legacy pipeline. Populates the 'transcript' tier and, best-effort, the
+    'speaker_turn' tier.
+
+    Args:
+        task: The annotation task whose segment should be transcribed. Must
+            have ``base_eaf_path`` set.
+        storage: Storage backend used to fetch/write the task's EAF file.
+        local_recording: Local path to the full recording the task's
+            segment belongs to.
+        api_key: ElevenLabs API key (``ELEVENLABS_API_KEY``).
+        language_code: ISO 639-1/3 language hint, or ``""`` to auto-detect.
+        num_speakers: Maximum number of speakers to detect, or ``None`` to
+            let the API decide.
+        clear_existing: Whether to clear existing annotations from the
+            'transcript' and 'speaker_turn' tiers before writing new ones.
+        session: If provided, ``task.asr_transcribed``/``task.asr_error``
+            are updated to reflect the outcome.
+
+    Raises:
+        ValueError: If ``task.base_eaf_path`` is not set.
+        Exception: Any failure from audio extraction, the ElevenLabs API
+            call, or EAF writing/upload is re-raised after recording it on
+            ``task.asr_error`` (when ``session`` is provided).
+
+    Requires ffmpeg on PATH.
+    """
+    if task.base_eaf_path is None:
+        raise ValueError("Task has no base_eaf_path.")
+
+    seg = task.segment
+
+    add_mod = _load_script("add_transcripts_to_eaf")
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="irl_asr_11labs_") as tmp_dir:
+            tmp = Path(tmp_dir)
+
+            wav_path = tmp / "segment.wav"
+            auto_pipeline.extract_segment_wav(seg, local_recording, wav_path)
+
+            transcript_data = elevenlabs_stt.transcribe_wav(
+                wav_path,
+                api_key,
+                language_code=language_code,
+                num_speakers=num_speakers,
+            )
+            transcript_segments = transcript_data.get("segments", [])
+            speaker_map = _speaker_turn_values(transcript_segments)
+
+            local_eaf = tmp / "base.eaf"
+            storage.get(task.base_eaf_path, local_eaf)
+
+            tree = ET.parse(local_eaf)
+            root = tree.getroot()
+
+            time_order = add_mod.ensure_time_order(root)
+            lt_ref = add_mod.ensure_linguistic_type(root)
+            transcript_tier = add_mod.ensure_tier(root, "transcript", lt_ref)
+            speaker_tier = add_mod.ensure_tier(root, "speaker_turn", lt_ref)
+
+            if clear_existing:
+                add_mod.clear_tier(transcript_tier)
+                add_mod.clear_tier(speaker_tier)
+
+            next_ts_id = add_mod.next_numeric_id(root, "ts", "TIME_SLOT_ID")
+            next_ann_id = add_mod.next_numeric_id(root, "a", "ANNOTATION_ID")
+
+            for seg_data in transcript_segments:
+                start_ms = int(round(float(seg_data["start"]) * 1000))
+                end_ms = int(round(float(seg_data["end"]) * 1000))
+                start_slot = f"ts{next_ts_id}"
+                end_slot = f"ts{next_ts_id + 1}"
+                next_ts_id += 2
+                add_mod.add_time_slot(time_order, start_slot, start_ms)
+                add_mod.add_time_slot(time_order, end_slot, end_ms)
+
+                text = str(seg_data.get("text", "")).strip()
+                if text:
+                    add_mod.add_segment_annotation(
+                        transcript_tier, text, f"a{next_ann_id}", start_slot, end_slot
+                    )
+                    next_ann_id += 1
+
+                speaker_value = speaker_map.get(seg_data.get("speaker"), "unknown")
+                add_mod.add_segment_annotation(
+                    speaker_tier, speaker_value, f"a{next_ann_id}", start_slot, end_slot
+                )
+                next_ann_id += 1
 
             add_mod.indent_xml(root)
             annotated_eaf = tmp / "transcribed.eaf"

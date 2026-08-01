@@ -239,4 +239,18 @@ python scripts/add_transcripts_to_eaf.py \
     --eaf data/clip.eaf --chunks-dir chunks/ --out data/clip_transcribed.eaf
 ```
 
+### ASR + diarization (ElevenLabs Scribe v2, batch)
+
+Requires `ELEVENLABS_API_KEY` env var and `ffmpeg` on PATH. Scribe v2 does
+transcription, non-speech filtering, and speaker diarization in a single
+batch call, populating the `transcript` and `speaker_turn` tiers.
+
+```bash
+irl annotate transcribe <task_id> --engine elevenlabs
+#   --num-speakers <n>   cap the number of speakers to detect
+```
+
+`irl annotate auto` and `irl recording add` use this engine automatically
+when `ELEVENLABS_API_KEY` is set (falling back to `transcribe_url` otherwise).
+
 Category definitions: [`annotations-v0.1.0-20260510.json`](annotations/annotations-v0.1.0-20260510.json)
