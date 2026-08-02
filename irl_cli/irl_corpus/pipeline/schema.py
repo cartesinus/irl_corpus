@@ -59,10 +59,3 @@ def get_tier_names(schema: AnnotationSchema) -> list[str]:
     """Return the list of tier names defined in the schema."""
     data = json.loads(schema.content)
     return list(data.get("tiers", {}).keys())
-
-
-def get_tier_values(schema: AnnotationSchema, tier_name: str) -> dict[str, str]:
-    """Return the allowed values dict for a given tier."""
-    data = json.loads(schema.content)
-    tier = data.get("tiers", {}).get(tier_name, {})
-    return tier.get("values", {})

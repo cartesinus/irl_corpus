@@ -14,14 +14,6 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 uv pip install -e .
 ```
 
-Optional extras for the auto-annotation scripts:
-
-```bash
-uv pip install -e ".[vad]"  # silero-vad (add_vad_to_eaf.py)
-uv pip install -e ".[vis]"  # matplotlib (wav_to_mel.py --png)
-uv pip install -e ".[all]"  # both
-```
-
 `ffmpeg` must also be on your `PATH`:
 
 ```bash
@@ -182,6 +174,29 @@ irl admin locks         # show all active working-on soft locks
 irl admin lock-clear <task_id>   # force-clear a stuck lock
 ```
 
+### `irl annotate`
+
+Auto-annotation for a task's segment. Requires `ffmpeg` on PATH.
+
+```bash
+irl annotate visual <task_id>
+#   --model gemini-2.5-flash   --fps 2.0   --replace/--no-replace
+#   requires GEMINI_API_KEY
+
+irl annotate transcribe <task_id>
+#   --engine legacy|elevenlabs   (default: legacy)
+#   --lang fr   --translate-lang ""   (legacy engine)
+#   --api-url <url>   --chunk-seconds 240   (legacy engine)
+#   --num-speakers <n>   (elevenlabs engine)
+#   --clear/--no-clear
+#   legacy requires transcribe_url configured; elevenlabs requires ELEVENLABS_API_KEY
+
+irl annotate auto <recording_id>
+#   --lang fr   --translate-lang ""   --force
+#   runs visual + ASR for every annotation task in the recording;
+#   skips steps already marked done unless --force
+```
+
 ---
 
 ## Typical annotator workflow
@@ -221,22 +236,6 @@ python scripts/annotate_visual.py data/clip.mp4 -o annotations.json
 
 python scripts/add_visual_annotations_to_eaf.py annotations.json data/clip.eaf
 # If tiers already have data: [r]eplace / [a]dd / [s]kip
-```
-
-### VAD (speech activity)
-
-```bash
-python scripts/add_vad_to_eaf.py \
-    --eaf data/clip.eaf --wav data/clip.wav --out data/clip_vad.eaf \
-    --clear-existing
-```
-
-### ASR (transcription)
-
-```bash
-bash scripts/transcribe_chunks.sh data/clip.wav chunks/
-python scripts/add_transcripts_to_eaf.py \
-    --eaf data/clip.eaf --chunks-dir chunks/ --out data/clip_transcribed.eaf
 ```
 
 ### ASR + diarization (ElevenLabs Scribe v2, batch)

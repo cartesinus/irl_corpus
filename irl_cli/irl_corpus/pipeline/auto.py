@@ -242,56 +242,6 @@ def extract_segment_wav(
     return out_path
 
 
-# ── script runners ────────────────────────────────────────────────────────────
-
-
-def run_transcription(
-    eaf_path: Path,
-    wav_path: Path,
-    out_path: Path,
-    scripts_dir: Path | None = None,
-) -> Path:
-    """Run the transcription pipeline and write results into the EAF.
-
-    Calls scripts/transcribe_chunks.sh + scripts/add_transcripts_to_eaf.py.
-    Returns the path to the annotated EAF.
-    """
-    if scripts_dir is None:
-        scripts_dir = Path(__file__).parent.parent.parent.parent / "scripts"
-
-    transcribe_sh = scripts_dir / "transcribe_chunks.sh"
-    add_transcripts_py = scripts_dir / "add_transcripts_to_eaf.py"
-
-    if not transcribe_sh.exists() or not add_transcripts_py.exists():
-        raise FileNotFoundError(
-            f"Auto-annotation scripts not found at {scripts_dir}. "
-            "Check your installation."
-        )
-
-    chunks_dir = out_path.parent / "chunks"
-    chunks_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["bash", str(transcribe_sh), str(wav_path), str(chunks_dir)],
-        check=True,
-    )
-
-    subprocess.run(
-        [
-            "python",
-            str(add_transcripts_py),
-            "--eaf",
-            str(eaf_path),
-            "--chunks-dir",
-            str(chunks_dir),
-            "--out",
-            str(out_path),
-        ],
-        check=True,
-    )
-
-    return out_path
-
-
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
