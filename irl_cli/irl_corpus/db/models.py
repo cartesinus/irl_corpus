@@ -193,8 +193,10 @@ class Task(Base):
     asr_transcribed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    translated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     visual_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     asr_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    translation_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     superseded_by: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("tasks.id"), nullable=True
     )

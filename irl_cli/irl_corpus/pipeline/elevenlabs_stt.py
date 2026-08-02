@@ -139,7 +139,9 @@ def _group_into_segments(words: list[dict], max_gap_seconds: float) -> list[dict
             or start - segments[-1]["end"] > max_gap_seconds
         )
         if starts_new_segment:
-            segments.append({"start": start, "end": end, "text": text, "speaker": speaker})
+            segments.append(
+                {"start": start, "end": end, "text": text, "speaker": speaker}
+            )
         else:
             segments[-1]["text"] += text
             segments[-1]["end"] = end

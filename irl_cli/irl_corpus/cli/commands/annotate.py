@@ -14,6 +14,7 @@ from irl_corpus.db import session_scope
 from irl_corpus.db.models import Recording
 from irl_corpus.db.queries import list_tasks, require_recording, require_task
 from irl_corpus.pipeline import annotate as annotate_pipeline
+from irl_corpus.pipeline import gpt_translate
 
 app = typer.Typer(help="Auto-annotation commands.", no_args_is_help=True)
 
@@ -100,7 +101,7 @@ def annotate_visual(
 
 
 @app.command("transcribe")
-def annotate_transcribe(  # pylint: disable=too-many-arguments
+def annotate_transcribe(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches
     task_id: str = typer.Argument(..., help="Task ID to transcribe."),
     engine: str = typer.Option(
         "legacy",
@@ -115,7 +116,9 @@ def annotate_transcribe(  # pylint: disable=too-many-arguments
     translate_lang: str = typer.Option(
         "",
         "--translate-lang",
-        help="Translation target language, legacy engine only (empty = no translation).",
+        help="Translation target language (empty = no translation). Works with "
+        "either engine when OPENAI_API_KEY is set; otherwise only the legacy "
+        "engine's bundled translation applies.",
     ),
     chunk_seconds: int = typer.Option(
         240,
@@ -140,9 +143,12 @@ def annotate_transcribe(  # pylint: disable=too-many-arguments
     """Run ASR transcription on a task's segment and inject into EAF.
 
     Requires ffmpeg on PATH. The legacy engine populates the 'transcript'
-    and 'translation' tiers via the configured transcribe_url; the
-    elevenlabs engine populates 'transcript' and 'speaker_turn' via the
-    ElevenLabs Scribe v2 batch API (requires ELEVENLABS_API_KEY).
+    tier via the configured transcribe_url; the elevenlabs engine populates
+    'transcript' and 'speaker_turn' via the ElevenLabs Scribe v2 batch API
+    (requires ELEVENLABS_API_KEY). If --translate-lang is set and
+    OPENAI_API_KEY is configured, a standalone GPT translation pass runs
+    afterward for either engine, populating 'translation'. Without
+    OPENAI_API_KEY, only the legacy engine's own bundled translation applies.
     """
     cfg = get_config()
     factory = get_factory(cfg)
@@ -212,17 +218,107 @@ def annotate_transcribe(  # pylint: disable=too-many-arguments
             print(f"[red]Transcription failed:[/red] {exc}")
             raise typer.Exit(1) from exc
 
+        if translate_lang:
+            openai_key = os.environ.get("OPENAI_API_KEY")
+            if openai_key:
+                print(
+                    f"[cyan]Translating[/cyan] segment {seg.id[:8]} → {translate_lang}…"
+                )
+                try:
+                    annotate_pipeline.run_translation(
+                        task,
+                        storage,
+                        openai_key,
+                        target_lang=translate_lang,
+                        clear_existing=clear_existing,
+                    )
+                except Exception as exc:  # pylint: disable=broad-except
+                    print(f"[yellow]Translation failed:[/yellow] {exc}")
+            elif engine != "legacy":
+                print(
+                    "[yellow]--translate-lang set but OPENAI_API_KEY not "
+                    "configured; skipping translation.[/yellow]"
+                )
+            # legacy engine already translated inline via transcribe_url
+
     print(f"[green]Transcription complete.[/green] EAF: {task.base_eaf_path}")
 
 
+@app.command("translate")
+def annotate_translate(
+    task_id: str = typer.Argument(..., help="Task ID to translate."),
+    target_lang: str = typer.Option(
+        ..., "--target-lang", "-t", help="Target language, e.g. 'en' or 'English'."
+    ),
+    source_lang: str = typer.Option(
+        "", "--source-lang", help="Optional source-language hint for the model."
+    ),
+    model: str = typer.Option(
+        gpt_translate.DEFAULT_MODEL, "--model", help="OpenAI Chat Completions model."
+    ),
+    clear_existing: bool = typer.Option(
+        True, "--clear/--no-clear", help="Clear existing translation tier first."
+    ),
+):
+    """Translate a task's existing transcript into the 'translation' tier via GPT.
+
+    Standalone step: works on whatever is currently in the 'transcript'
+    tier, regardless of which ASR engine (legacy or elevenlabs) wrote it.
+    Requires OPENAI_API_KEY and that ASR transcription has already run
+    (via 'irl annotate transcribe').
+    """
+    cfg = get_config()
+    factory = get_factory(cfg)
+    storage = get_storage(cfg)
+
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        print("[red]OPENAI_API_KEY environment variable is not set.[/red]")
+        raise typer.Exit(1)
+
+    with session_scope(factory) as session:
+        try:
+            task = require_task(session, task_id)
+        except ValueError as exc:
+            print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+
+        if task.base_eaf_path is None:
+            print(
+                "[red]Task has no base EAF path. Run 'irl recording split' first.[/red]"
+            )
+            raise typer.Exit(1)
+
+        print(
+            f"[cyan]Translating[/cyan] segment {task.segment_id[:8]} → {target_lang}…"
+        )
+        try:
+            annotate_pipeline.run_translation(
+                task,
+                storage,
+                api_key,
+                target_lang=target_lang,
+                source_lang=source_lang,
+                model=model,
+                clear_existing=clear_existing,
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            print(f"[red]Translation failed:[/red] {exc}")
+            raise typer.Exit(1) from exc
+
+    print(f"[green]Translation complete.[/green] EAF: {task.base_eaf_path}")
+
+
 @app.command("auto")
-def annotate_auto(
+def annotate_auto(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     recording_id: str = typer.Argument(..., help="Recording ID (or prefix)."),
     lang: str = typer.Option("fr", "--lang", "-l", help="Source language for ASR."),
     translate_lang: str = typer.Option(
         "",
         "--translate-lang",
-        help="Translation target language (empty = no translation).",
+        help="Translation target language (empty = no translation). Works with "
+        "either engine when OPENAI_API_KEY is set; otherwise only the legacy "
+        "engine's bundled translation applies.",
     ),
     force: bool = typer.Option(
         False,
@@ -231,7 +327,7 @@ def annotate_auto(
         help="Re-run even if already marked done.",
     ),
 ):
-    """Run (or re-run) visual + ASR annotation for all tasks in a recording.
+    """Run (or re-run) visual + ASR + translation annotation for a recording.
 
     Skips steps already marked done unless --force is given.
     Safe to run multiple times — acts as a resume mechanism.
@@ -243,6 +339,7 @@ def annotate_auto(
     resolved_api_url = cfg.services.transcribe_url
     gemini_key = os.environ.get("GEMINI_API_KEY")
     elevenlabs_key = os.environ.get("ELEVENLABS_API_KEY")
+    openai_key = os.environ.get("OPENAI_API_KEY")
 
     with session_scope(factory) as session:
         try:
@@ -280,6 +377,7 @@ def annotate_auto(
             if force:
                 task.visual_annotated = False
                 task.asr_transcribed = False
+                task.translated = False
 
             # Visual
             if task.visual_annotated:
@@ -305,6 +403,7 @@ def annotate_auto(
                 )
 
             # ASR
+            used_legacy_bundled_translation = False
             if task.asr_transcribed:
                 print(f"  [dim]ASR {task.segment_id[:8]}: already done[/dim]")
             elif task.asr_error and not force:
@@ -339,10 +438,46 @@ def annotate_auto(
                         session=session,
                     )
                     print("  [green]done[/green]")
+                    used_legacy_bundled_translation = bool(translate_lang)
                 except Exception as exc:  # pylint: disable=broad-except
                     print(f"  [yellow]failed:[/yellow] {exc}")
             else:
                 print(
                     f"  [dim]ASR {task.segment_id[:8]}: skipped "
                     "(neither ELEVENLABS_API_KEY nor transcribe_url configured)[/dim]"
+                )
+
+            # Translate (standalone GPT step — works regardless of ASR engine)
+            if not translate_lang:
+                pass
+            elif task.translated:
+                print(f"  [dim]translate {task.segment_id[:8]}: already done[/dim]")
+            elif task.translation_error and not force:
+                print(
+                    f"  [yellow]translate {task.segment_id[:8]}: last error:[/yellow] "
+                    f"{task.translation_error}"
+                )
+                print("    (run with --force to retry)")
+            elif openai_key:
+                print(f"[cyan]Translate[/cyan] {task.segment_id[:8]}…")
+                try:
+                    annotate_pipeline.run_translation(
+                        task,
+                        storage,
+                        openai_key,
+                        target_lang=translate_lang,
+                        session=session,
+                    )
+                    print("  [green]done[/green]")
+                except Exception as exc:  # pylint: disable=broad-except
+                    print(f"  [yellow]failed:[/yellow] {exc}")
+            elif used_legacy_bundled_translation:
+                print(
+                    f"  [dim]translate {task.segment_id[:8]}: done via legacy "
+                    "transcribe_url's bundled translation[/dim]"
+                )
+            else:
+                print(
+                    f"  [dim]translate {task.segment_id[:8]}: skipped "
+                    "(OPENAI_API_KEY not set)[/dim]"
                 )

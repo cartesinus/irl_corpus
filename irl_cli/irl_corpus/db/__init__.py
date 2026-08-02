@@ -1,16 +1,15 @@
-"""Database engine, session factory, and Alembic helpers."""
+"""Database engine, session factory, and schema creation."""
 
 from __future__ import annotations
 
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Generator
 
-from alembic import command as alembic_command
-from alembic.config import Config as AlembicConfig
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+
+from irl_corpus.db.models import Base
 
 
 def get_engine(url: str) -> Engine:
@@ -46,16 +45,12 @@ def session_scope(factory: sessionmaker) -> Generator[Session, None, None]:
         session.close()
 
 
-def make_alembic_config(db_url: str) -> AlembicConfig:
-    """Build an AlembicConfig pointing at the bundled migrations directory."""
-    migrations_dir = Path(__file__).parent / "migrations"
-    cfg = AlembicConfig()
-    cfg.set_main_option("script_location", str(migrations_dir))
-    cfg.set_main_option("sqlalchemy.url", db_url)
-    return cfg
-
-
 def init_db(db_url: str) -> None:
-    """Run all pending migrations (create tables on first run)."""
-    cfg = make_alembic_config(db_url)
-    alembic_command.upgrade(cfg, "head")
+    """Create all tables from the current models (no-op if they already exist).
+
+    There's no production database yet, so schema changes are made directly
+    on the models rather than tracked through migrations; this just (re)syncs
+    tables to whatever the models currently declare.
+    """
+    engine = get_engine(db_url)
+    Base.metadata.create_all(engine)

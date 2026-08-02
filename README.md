@@ -72,7 +72,7 @@ export IRL_TRANSCRIBE_URL="https://..."
 ## First-time setup
 
 ```bash
-irl admin init                                        # create / migrate the database
+irl admin init                                        # create the database schema
 irl schema import annotations/annotations-v0.1.0-20260510.json   # import annotation schema
 irl user add --name yourname --role admin             # add yourself
 irl user add --name alice                             # add other annotators
@@ -86,7 +86,9 @@ irl user add --name alice                             # add other annotators
 
 ```bash
 irl recording add <file> --title "Stream 2026-05-01"
-#   --duration-ms <ms>   set duration if known (otherwise set it separately)
+#   --duration-ms <ms>     set duration if known (otherwise set it separately)
+#   --auto-annotate        run visual + ASR + translation immediately (default: off)
+#   --lang fr   --translate-lang ""   (only relevant with --auto-annotate)
 
 irl recording list
 irl recording show <recording_id>
@@ -168,7 +170,7 @@ irl user list
 ### `irl admin`
 
 ```bash
-irl admin init          # create or migrate the database (run on first setup)
+irl admin init          # create the database schema (run on first setup)
 irl admin stats         # corpus-wide progress overview
 irl admin locks         # show all active working-on soft locks
 irl admin lock-clear <task_id>   # force-clear a stuck lock
@@ -185,15 +187,23 @@ irl annotate visual <task_id>
 
 irl annotate transcribe <task_id>
 #   --engine legacy|elevenlabs   (default: legacy)
-#   --lang fr   --translate-lang ""   (legacy engine)
+#   --lang fr   --translate-lang ""
 #   --api-url <url>   --chunk-seconds 240   (legacy engine)
 #   --num-speakers <n>   (elevenlabs engine)
 #   --clear/--no-clear
 #   legacy requires transcribe_url configured; elevenlabs requires ELEVENLABS_API_KEY
+#   --translate-lang works with either engine when OPENAI_API_KEY is set
+#   (a standalone GPT pass runs after ASR); without it, only the legacy
+#   engine's own bundled translation applies
+
+irl annotate translate <task_id> --target-lang en
+#   --source-lang ""   --model gpt-5-nano   --clear/--no-clear
+#   standalone GPT translation of whatever is already in the 'transcript'
+#   tier, regardless of which ASR engine wrote it; requires OPENAI_API_KEY
 
 irl annotate auto <recording_id>
 #   --lang fr   --translate-lang ""   --force
-#   runs visual + ASR for every annotation task in the recording;
+#   runs visual + ASR + translation for every annotation task in the recording;
 #   skips steps already marked done unless --force
 ```
 
@@ -251,5 +261,35 @@ irl annotate transcribe <task_id> --engine elevenlabs
 
 `irl annotate auto` and `irl recording add` use this engine automatically
 when `ELEVENLABS_API_KEY` is set (falling back to `transcribe_url` otherwise).
+
+### Translation (GPT)
+
+Requires `OPENAI_API_KEY` env var. Standalone step: translates whatever is
+currently in the `transcript` tier into the `translation` tier, regardless
+of which ASR engine wrote it — so it works the same way after either the
+legacy or elevenlabs engine.
+
+```bash
+irl annotate translate <task_id> --target-lang en
+#   --source-lang ""   --model gpt-5-nano   --clear/--no-clear
+```
+
+`irl annotate transcribe`, `irl annotate auto`, and `irl recording add` all
+chain this in automatically whenever `--translate-lang` is set and
+`OPENAI_API_KEY` is configured. Without an OpenAI key, the legacy engine's
+own bundled translation (via `transcribe_url`) is the only translation
+available, and the elevenlabs engine gets none.
+
+The system prompt sent to the model is a template at
+[`config/translate_system_prompt.txt`](config/translate_system_prompt.txt) —
+edit it directly to tune translation behavior; no code change needed. It's
+rendered with `{target_lang}`, `{source_hint}`, and `{count}` placeholders.
+
+Since the model is asked to preserve an exact line count per batch and
+sometimes doesn't (merging/dropping a line), a failed batch raises instead
+of silently misaligning timestamps. When that happens, the full input batch
+and the model's raw response are appended as a JSON line to
+`logs/gpt_translate.jsonl` (gitignored — may contain real transcript
+content) for debugging.
 
 Category definitions: [`annotations-v0.1.0-20260510.json`](annotations/annotations-v0.1.0-20260510.json)

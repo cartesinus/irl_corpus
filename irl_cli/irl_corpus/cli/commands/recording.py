@@ -29,7 +29,7 @@ app = typer.Typer(help="Manage recordings.", no_args_is_help=True)
 _30_MIN_MS = 30 * 60 * 1000
 
 
-def _run_auto_annotation(  # pylint: disable=too-many-arguments
+def _run_auto_annotation(  # pylint: disable=too-many-arguments,too-many-locals,too-many-branches
     session,
     task,
     storage,
@@ -40,8 +40,9 @@ def _run_auto_annotation(  # pylint: disable=too-many-arguments
     translate_lang,
     gemini_key,
     elevenlabs_key,
+    openai_key,
 ):
-    """Run visual + ASR annotation for a single task.
+    """Run visual + ASR + translation annotation for a single task.
 
     Best-effort: exceptions from each step are caught and printed as
     warnings so one failing step doesn't abort the others.
@@ -53,13 +54,16 @@ def _run_auto_annotation(  # pylint: disable=too-many-arguments
         local_recording: Local path to the recording the task belongs to.
         transcribe_url: Legacy ASR API endpoint, or ``None`` to skip it.
         lang: Source language code for ASR.
-        translate_lang: Translation target language for the legacy engine
-            (ignored by the elevenlabs engine).
+        translate_lang: Translation target language, or ``""`` to skip
+            translation.
         gemini_key: ``GEMINI_API_KEY`` value, or ``None`` to skip visual
             annotation.
         elevenlabs_key: ``ELEVENLABS_API_KEY`` value. When set, ASR uses the
             ElevenLabs Scribe v2 engine (transcribe + diarize + VAD in one
             call) in preference to ``transcribe_url``.
+        openai_key: ``OPENAI_API_KEY`` value. When set, a standalone GPT
+            translation pass runs after ASR (either engine). Without it,
+            only the legacy engine's own bundled translation applies.
     """
     seg_short = task.segment_id[:8]
 
@@ -77,6 +81,7 @@ def _run_auto_annotation(  # pylint: disable=too-many-arguments
     else:
         print(f"  [dim]visual {seg_short}: skipped (GEMINI_API_KEY not set)[/dim]")
 
+    used_legacy_bundled_translation = False
     if task.asr_transcribed:
         print(f"  [dim]ASR {seg_short}: already done[/dim]")
     elif elevenlabs_key:
@@ -106,6 +111,7 @@ def _run_auto_annotation(  # pylint: disable=too-many-arguments
                 session=session,
             )
             print("  [green]done[/green]")
+            used_legacy_bundled_translation = bool(translate_lang)
         except Exception as exc:  # pylint: disable=broad-except
             print(f"  [yellow]failed:[/yellow] {exc}")
     else:
@@ -113,6 +119,27 @@ def _run_auto_annotation(  # pylint: disable=too-many-arguments
             f"  [dim]ASR {seg_short}: skipped "
             "(neither ELEVENLABS_API_KEY nor transcribe_url configured)[/dim]"
         )
+
+    if not translate_lang:
+        return
+    if task.translated:
+        print(f"  [dim]translate {seg_short}: already done[/dim]")
+    elif openai_key:
+        print(f"[cyan]Translation[/cyan] {seg_short}…")
+        try:
+            annotate_pipeline.run_translation(
+                task, storage, openai_key, target_lang=translate_lang, session=session
+            )
+            print("  [green]done[/green]")
+        except Exception as exc:  # pylint: disable=broad-except
+            print(f"  [yellow]failed:[/yellow] {exc}")
+    elif used_legacy_bundled_translation:
+        print(
+            f"  [dim]translate {seg_short}: done via legacy "
+            "transcribe_url's bundled translation[/dim]"
+        )
+    else:
+        print(f"  [dim]translate {seg_short}: skipped (OPENAI_API_KEY not set)[/dim]")
 
 
 def _fmt_duration(millis: int | None) -> str:
@@ -144,15 +171,20 @@ def recording_add(  # pylint: disable=too-many-locals,too-many-statements
         True, "--eaf/--no-eaf", help="Create base EAF files for each segment."
     ),
     auto_annotate: bool = typer.Option(
-        True,
+        False,
         "--auto-annotate/--no-auto-annotate",
-        help="Run visual + transcription auto-annotation after ingestion (default: on).",
+        help="Run visual + transcription + translation auto-annotation "
+        "immediately after ingestion (default: off — use 'irl annotate "
+        "transcribe/translate/visual' per task, or 'irl annotate auto' for "
+        "a recording, once you're ready).",
     ),
     lang: str = typer.Option("fr", "--lang", help="Source language for transcription."),
     translate_lang: str = typer.Option(
         "",
         "--translate-lang",
-        help="Translation target language (empty = no translation).",
+        help="Translation target language (empty = no translation). Works with "
+        "either ASR engine when OPENAI_API_KEY is set; otherwise only the "
+        "legacy engine's bundled translation applies.",
     ),
 ):
     """Upload a recording, auto-split into segments, and create base EAF files.
@@ -161,7 +193,9 @@ def recording_add(  # pylint: disable=too-many-locals,too-many-statements
     MPEG-TS (.ts) files are transcoded to MP4 (stream-copy) before upload.
     Recordings longer than --segment-ms are split into fixed-length segments.
     A base EAF (empty tiers, media link) is stored for each content segment.
-    Visual (Gemini) and ASR annotation run automatically if configured.
+    Auto-annotation (visual/ASR/translation) is off by default — pass
+    --auto-annotate to run it immediately, or annotate per task/recording
+    afterward with 'irl annotate transcribe|translate|visual|auto'.
     """
     cfg = get_config()
     factory = get_factory(cfg)
@@ -306,6 +340,7 @@ def recording_add(  # pylint: disable=too-many-locals,too-many-statements
                             translate_lang=translate_lang,
                             gemini_key=os.environ.get("GEMINI_API_KEY"),
                             elevenlabs_key=os.environ.get("ELEVENLABS_API_KEY"),
+                            openai_key=os.environ.get("OPENAI_API_KEY"),
                         )
 
     finally:

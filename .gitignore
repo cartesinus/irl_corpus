@@ -222,7 +222,11 @@ irl.toml
 
 # IRL Corpus — runtime data (never commit recordings or annotations to git)
 corpus.db
+corpus.db*
 *.db
 corpus_data/
 data/
 out.json
+
+# IRL Corpus — debug logs (may contain real transcript/translation content)
+logs/

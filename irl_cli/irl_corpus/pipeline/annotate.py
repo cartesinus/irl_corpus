@@ -1,4 +1,4 @@
-"""Auto-annotation pipeline: visual (Gemini) and ASR transcription."""
+"""Auto-annotation pipeline: visual (Gemini), ASR transcription, translation."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from irl_corpus.db.models import Task
 from irl_corpus.pipeline import auto as auto_pipeline
 from irl_corpus.pipeline import elevenlabs_stt
+from irl_corpus.pipeline import gpt_translate
 from irl_corpus.pipeline import transcribe as transcribe_pipeline
 from irl_corpus.storage import Storage
 
@@ -390,5 +391,150 @@ def run_transcription_elevenlabs(  # pylint: disable=too-many-arguments,too-many
             import sys  # pylint: disable=import-outside-toplevel
 
             task.asr_error = str(sys.exc_info()[1])
+            session.flush()
+        raise
+
+
+def _read_tier_segments(root: ET.Element, tier_id: str) -> list[dict]:
+    """Read time-aligned annotation values from a tier, sorted chronologically.
+
+    Args:
+        root: The EAF's root ``ANNOTATION_DOCUMENT`` element.
+        tier_id: ``TIER_ID`` to read from, e.g. ``"transcript"``.
+
+    Returns:
+        A list of dicts with ``start_slot``, ``end_slot``, ``text``, and
+        ``start_ms`` keys, sorted by ``start_ms``. Annotations with empty
+        text (or missing time-slot refs) are skipped.
+    """
+    time_values = {
+        slot.attrib["TIME_SLOT_ID"]: int(slot.attrib["TIME_VALUE"])
+        for slot in root.findall("TIME_ORDER/TIME_SLOT")
+        if slot.attrib.get("TIME_VALUE") is not None
+    }
+
+    segments: list[dict] = []
+    for tier in root.findall("TIER"):
+        if tier.attrib.get("TIER_ID") != tier_id:
+            continue
+        for annotation in tier.findall("ANNOTATION/ALIGNABLE_ANNOTATION"):
+            start_slot = annotation.attrib.get("TIME_SLOT_REF1")
+            end_slot = annotation.attrib.get("TIME_SLOT_REF2")
+            value_elem = annotation.find("ANNOTATION_VALUE")
+            text = (value_elem.text or "").strip() if value_elem is not None else ""
+            if not text or start_slot is None or end_slot is None:
+                continue
+            segments.append(
+                {
+                    "start_slot": start_slot,
+                    "end_slot": end_slot,
+                    "text": text,
+                    "start_ms": time_values.get(start_slot, 0),
+                }
+            )
+
+    segments.sort(key=lambda seg: seg["start_ms"])
+    return segments
+
+
+def run_translation(  # pylint: disable=too-many-arguments,too-many-locals
+    task: Task,
+    storage: Storage,
+    api_key: str,
+    *,
+    target_lang: str,
+    source_lang: str = "",
+    model: str = gpt_translate.DEFAULT_MODEL,
+    clear_existing: bool = True,
+    session: Session | None = None,
+) -> None:
+    """Translate a task's existing 'transcript' tier into the 'translation' tier.
+
+    Unlike the legacy engine (whose external transcribe_url service bundles
+    translation into the same call as ASR), this is a standalone GPT-based
+    step: it works on whatever text is currently in the 'transcript' tier,
+    regardless of which ASR engine (legacy or elevenlabs) wrote it. ASR
+    transcription must have already populated that tier.
+
+    Args:
+        task: The annotation task to translate. Must have ``base_eaf_path``
+            set.
+        storage: Storage backend used to fetch/write the task's EAF file.
+        api_key: OpenAI API key (``OPENAI_API_KEY``).
+        target_lang: Target language, e.g. ``"en"`` or ``"English"``.
+        source_lang: Optional source-language hint, or ``""`` to omit it.
+        model: Chat Completions model id.
+        clear_existing: Whether to clear existing 'translation' tier
+            annotations before writing new ones.
+        session: If provided, ``task.translated``/``task.translation_error``
+            are updated to reflect the outcome.
+
+    Raises:
+        ValueError: If ``task.base_eaf_path`` is not set, or the
+            'transcript' tier has no annotations to translate.
+        Exception: Any failure from the OpenAI API call or EAF writing/
+            upload is re-raised after recording it on
+            ``task.translation_error`` (when ``session`` is provided).
+    """
+    if task.base_eaf_path is None:
+        raise ValueError("Task has no base_eaf_path.")
+
+    add_mod = _load_script("add_transcripts_to_eaf")
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="irl_translate_") as tmp_dir:
+            tmp = Path(tmp_dir)
+            local_eaf = tmp / "base.eaf"
+            storage.get(task.base_eaf_path, local_eaf)
+
+            tree = ET.parse(local_eaf)
+            root = tree.getroot()
+
+            transcript_segments = _read_tier_segments(root, "transcript")
+            if not transcript_segments:
+                raise ValueError(
+                    "Task's 'transcript' tier has no annotations to "
+                    "translate. Run ASR transcription first."
+                )
+
+            translations = gpt_translate.translate_texts(
+                [seg["text"] for seg in transcript_segments],
+                api_key,
+                target_lang=target_lang,
+                source_lang=source_lang,
+                model=model,
+            )
+
+            lt_ref = add_mod.ensure_linguistic_type(root)
+            translation_tier = add_mod.ensure_tier(root, "translation", lt_ref)
+            if clear_existing:
+                add_mod.clear_tier(translation_tier)
+
+            next_ann_id = add_mod.next_numeric_id(root, "a", "ANNOTATION_ID")
+            for seg, translated in zip(transcript_segments, translations):
+                add_mod.add_segment_annotation(
+                    translation_tier,
+                    translated,
+                    f"a{next_ann_id}",
+                    seg["start_slot"],
+                    seg["end_slot"],
+                )
+                next_ann_id += 1
+
+            add_mod.indent_xml(root)
+            annotated_eaf = tmp / "translated.eaf"
+            tree.write(str(annotated_eaf), encoding="UTF-8", xml_declaration=True)
+
+            storage.put(annotated_eaf, task.base_eaf_path)
+
+        if session is not None:
+            task.translated = True
+            task.translation_error = None
+            session.flush()
+    except Exception:
+        if session is not None:
+            import sys  # pylint: disable=import-outside-toplevel
+
+            task.translation_error = str(sys.exc_info()[1])
             session.flush()
         raise
