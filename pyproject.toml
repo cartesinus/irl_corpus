@@ -16,6 +16,7 @@ dependencies = [
 vad = ["silero-vad"]
 vis = ["matplotlib"]
 all = ["silero-vad", "matplotlib"]
+dev = ["pre-commit", "black", "ruff", "pylint"]
 
 [project.scripts]
 irl = "irl_corpus.cli.main:app"
@@ -26,3 +27,25 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["irl_cli"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Keep this to the "similar to black/whitespace" checks this project wants;
+# not a full flake8-style ruleset.
+select = [
+    "E",    # pycodestyle errors (includes W191 tab-indentation, E501 line length)
+    "W",    # pycodestyle warnings (trailing whitespace, etc.)
+    "F",    # pyflakes (unused imports/names, undefined names)
+    "I",    # isort (import ordering)
+]
+ignore = [
+    "E203",  # whitespace before ':' — black-formatted slices trigger this
+    "E501",  # line length — enforced by black instead
+]

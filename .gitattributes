@@ -1,0 +1,9 @@
+# Normalize all text files to LF on checkin, regardless of the
+# contributor's platform/editor settings.
+* text=auto eol=lf
+
+# Binary/media — never touch line endings or diff these.
+*.mp4 binary
+*.wav binary
+*.eaf binary
+*.db binary

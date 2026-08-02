@@ -1,0 +1,48 @@
+# Fast checks run on every commit; the heavier pylint gate runs on push
+# (see the `stages:` on each hook). Install both with:
+#   pre-commit install --hook-type pre-commit --hook-type pre-push
+#
+# Run `pre-commit autoupdate` periodically to bump the pinned `rev`s.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        stages: [pre-commit]
+      - id: end-of-file-fixer
+        stages: [pre-commit]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        stages: [pre-commit]
+      - id: fix-byte-order-marker
+        stages: [pre-commit]
+      - id: check-merge-conflict
+        stages: [pre-commit]
+      - id: check-case-conflict
+        stages: [pre-commit]
+      - id: check-added-large-files
+        args: [--maxkb=5000]
+        stages: [pre-commit]
+
+  - repo: https://github.com/psf/black
+    rev: 26.5.1
+    hooks:
+      - id: black
+        stages: [pre-commit]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.1
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        stages: [pre-commit]
+
+  - repo: local
+    hooks:
+      - id: pylint-threshold
+        name: pylint (fail under 9.5, changed files only)
+        entry: .venv/bin/pylint --fail-under=9.5
+        language: system
+        types: [python]
+        stages: [pre-push]
