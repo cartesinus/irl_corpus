@@ -69,6 +69,34 @@ export IRL_TRANSCRIBE_URL="https://..."
 
 ---
 
+## PostgreSQL setup (multiple machines)
+
+On the database host:
+
+```bash
+sudo apt install postgresql
+
+sudo -u postgres PGDB_PASSWORD='choose-a-password' ./scripts/setup_postgres.sh
+#   PGDB_USER=irl          override the role name
+#   PGDB_NAME=irl_corpus   override the database name
+
+sudo -u postgres psql -c \
+    "ALTER SYSTEM SET listen_addresses = 'localhost,$(tailscale ip -4)';"
+
+echo "host  irl_corpus  irl  100.64.0.0/10  scram-sha-256" \
+    | sudo tee -a /etc/postgresql/16/main/pg_hba.conf
+
+sudo systemctl restart postgresql
+```
+
+On each machine using the corpus set the db url as:
+
+```bash
+"postgresql://irl:choose-a-password@<tailscale-host>:5432/irl_corpus"
+```
+
+---
+
 ## First-time setup
 
 ```bash
