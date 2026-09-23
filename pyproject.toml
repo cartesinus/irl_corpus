@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "google-genai",
     "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
     "fsspec",
     "s3fs",
     "typer[all]",
