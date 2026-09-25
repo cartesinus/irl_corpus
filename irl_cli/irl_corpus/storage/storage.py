@@ -33,18 +33,34 @@ class Storage:
             filesystem.makedirs(root, exist_ok=True)
             return cls(filesystem, root)
 
-        # S3 / OVH Object Storage
-        kwargs: dict = {}
-        if cfg.access_key:
-            kwargs["key"] = cfg.access_key
-        if cfg.secret_key:
-            kwargs["secret"] = cfg.secret_key
-        if cfg.endpoint:
-            kwargs["endpoint_url"] = cfg.endpoint
-            kwargs["client_kwargs"] = {"endpoint_url": cfg.endpoint}
-        filesystem = fsspec.filesystem("s3", **kwargs)
-        root = f"s3://{cfg.bucket}"
-        return cls(filesystem, root)
+        if cfg.backend == "sftp":
+            kwargs: dict = {"host": cfg.host, "username": cfg.username}
+            if cfg.port:
+                kwargs["port"] = cfg.port
+            if cfg.key_filename:
+                kwargs["key_filename"] = str(Path(cfg.key_filename).expanduser())
+            if cfg.password:
+                kwargs["password"] = cfg.password
+            filesystem = fsspec.filesystem("sftp", **kwargs)
+            return cls(filesystem, cfg.root)
+
+        if cfg.backend == "s3":
+            # S3 / OVH Object Storage
+            kwargs: dict = {}
+            if cfg.access_key:
+                kwargs["key"] = cfg.access_key
+            if cfg.secret_key:
+                kwargs["secret"] = cfg.secret_key
+            if cfg.endpoint:
+                kwargs["endpoint_url"] = cfg.endpoint
+                kwargs["client_kwargs"] = {"endpoint_url": cfg.endpoint}
+            filesystem = fsspec.filesystem("s3", **kwargs)
+            root = f"s3://{cfg.bucket}"
+            return cls(filesystem, root)
+            
+        raise ValueError(
+            f"Unknown storage backend: {cfg.backend!r} (expected local, sftp or s3)."
+        )
 
     # ── internal path helper ──────────────────────────────────────────────────
 
@@ -60,6 +76,13 @@ class Storage:
     def open(self, path: str, mode: str = "rb") -> IO:
         """Open a file in storage and return a file-like object."""
         return self.filesystem.open(self._full(path), mode)
+
+    def size(self, path: str) -> int | None:
+        """Return the size of a stored file in bytes, or None if unavailable."""
+        try:
+            return self.filesystem.info(self._full(path)).get("size")
+        except FileNotFoundError:
+            return None
 
     def put(self, local_path: str | Path, remote_path: str) -> None:
         """Upload a local file to storage."""

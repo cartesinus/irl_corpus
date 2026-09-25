@@ -12,12 +12,17 @@ from pathlib import Path
 class StorageConfig:
     """Storage backend settings (local or S3-compatible)."""
 
-    backend: str = "local"  # "local" | "s3"
-    root: str = "./corpus_data"  # local path or s3://bucket
+    backend: str = "local"  # "local" | "sftp" | "s3"
+    root: str = "./corpus_data"  # local path, remote path (sftp) or s3://bucket
     endpoint: str | None = None  # OVH / custom S3 endpoint URL
     bucket: str | None = None
     access_key: str | None = None
     secret_key: str | None = None
+    host: str | None = None  # sftp
+    username: str | None = None
+    port: int = 22 
+    key_filename: str | None = None
+    password: str | None = None
 
 
 @dataclass
@@ -87,6 +92,14 @@ class Config:
             or storage_raw.get("access_key"),
             secret_key=os.environ.get("IRL_STORAGE_SECRET_KEY")
             or storage_raw.get("secret_key"),
+            host=os.environ.get("IRL_STORAGE_HOST") or storage_raw.get("host"),
+            username=os.environ.get("IRL_STORAGE_USER")
+            or storage_raw.get("username"),
+            port=int(storage_raw.get("port", 22)),
+            key_filename=os.environ.get("IRL_STORAGE_SSH_KEY")
+            or storage_raw.get("key_filename"),
+            password=os.environ.get("IRL_STORAGE_PASSWORD")
+            or storage_raw.get("password"),
         )
 
         db_raw = raw.get("database", {})

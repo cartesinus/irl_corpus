@@ -57,15 +57,40 @@ url = "postgresql://user:pass@host/dbname"
 name = "yourname"
 ```
 
+For an annotator machine reaching the corpus over SSH (see `irl task fetch`):
+
+```toml
+[storage]
+backend = "sftp"
+host = "central.tailnet-name.ts.net"
+username = "irl"
+key_filename = "~/.ssh/irl_corpus"
+root = "/mnt/secure_hdd/twitch"   # the host [storage] root
+# port = 22
+
+[database]
+url = "postgresql://user:pass@host/dbname"
+
+[annotator]
+name = "yourname"
+```
+
 Sensitive values can be set via environment variables instead of the config file:
 
 ```bash
 export IRL_STORAGE_ACCESS_KEY="..."
 export IRL_STORAGE_SECRET_KEY="..."
+export IRL_STORAGE_HOST="central.tailnet-name.ts.net"
+export IRL_STORAGE_USER="irl"
+export IRL_STORAGE_SSH_KEY="~/.ssh/irl_corpus"
+export IRL_STORAGE_PASSWORD="..."
 export IRL_DB_URL="postgresql://..."
 export IRL_ANNOTATOR_NAME="yourname"
 export IRL_TRANSCRIBE_URL="https://..."
 ```
+
+`irl annotate` requires `backend = "local"`, so auto-annotation runs on the machine
+holding the recordings, not on annotator laptops.
 
 ---
 
@@ -94,6 +119,45 @@ On each machine using the corpus set the db url as:
 ```bash
 "postgresql://irl:choose-a-password@<tailscale-host>:5432/irl_corpus"
 ```
+
+---
+
+## SSH setup (multiple machines)
+
+Annotator machines fetch corpus files over SFTP, so the machine holding them needs
+an SSH server.
+
+On the file host, to create the server:
+
+```bash
+sudo CORPUS_ROOT=/mnt/secure_hdd/twitch ./scripts/ssh-server-setup.sh
+#   SSH_USER=irl   override the account name
+```
+
+On each annotator machine:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/irl_corpus -C "yourname@irl-corpus"
+cat ~/.ssh/irl_corpus.pub
+```
+
+Back on the file host, one line per annotator:
+
+```bash
+printf 'from="100.64.0.0/10",restrict %s\n' '<pasted public key>' \
+    | sudo -u irl tee -a /home/irl/.ssh/authorized_keys
+```
+
+Then on the annotator machine, record the host key — paramiko refuses to connect to
+hosts missing from `known_hosts`:
+
+```bash
+sftp -i ~/.ssh/irl_corpus irl@<tailscale-host>      # accept the fingerprint
+```
+
+`from="100.64.0.0/10"` limits each key to Tailscale addresses, and `restrict`
+disables everything except file transfer. Revoke an annotator by deleting their line
+from `authorized_keys`.
 
 ---
 
@@ -157,6 +221,9 @@ irl task list
 irl task show <task_id>   # details + save history + chain
 
 # Annotator workflow
+irl task fetch <task_id>                 # download EAF + recording for ELAN
+#   --dest ~/irl_work    local working directory
+#   --force              re-download even if the media is already present
 irl task take <task_id>                   # assign to self + soft lock
 irl task working <task_id>                # mark as currently open (already assigned)
 irl task release <task_id>               # clear working-on lock (stepping away)
@@ -242,7 +309,8 @@ irl annotate auto <recording_id>
 ```bash
 irl task list --status pending          # find available tasks
 irl task take <task_id>                 # claim it (assigns + locks)
-# open base EAF from task.base_eaf_path in ELAN, annotate…
+irl task fetch <task_id>                # download the EAF + recording locally
+# open the fetched EAF in ELAN, annotate…
 irl task save <task_id> my_work.eaf    # save partial progress anytime
 # …keep annotating…
 irl task finish <task_id> my_work.eaf  # submit — validation task is auto-created
