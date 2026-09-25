@@ -9,6 +9,7 @@ dependencies = [
     "psycopg2-binary>=2.9",
     "fsspec",
     "s3fs",
+    "paramiko>=3.0",
     "typer[all]",
     "rich",
 ]

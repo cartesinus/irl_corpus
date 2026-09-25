@@ -19,6 +19,7 @@ from irl_corpus.db.queries import (
     list_tasks,
     require_task,
 )
+from irl_corpus.pipeline import fetch as fetch_pipeline
 from irl_corpus.pipeline import tasks as task_pipeline
 
 app = typer.Typer(help="Manage annotation tasks.", no_args_is_help=True)
@@ -224,6 +225,36 @@ def task_release(
     with session_scope(factory) as session:
         task = task_pipeline.release_working(session, task_id)
         print(f"[yellow]Released[/yellow] working lock on task {task.id[:8]}")
+
+
+@app.command("fetch")
+def task_fetch(
+    task_id: str = typer.Argument(..., help="Task ID."),
+    dest: Path = typer.Option(
+        Path("~/irl_work"), "--dest", help="Local working directory."
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Re-download even if the media is already present."
+    ),
+):
+    """Download a task's EAF and its recording for annotating in ELAN."""
+    cfg = get_config()
+    factory = get_factory(cfg)
+    storage = get_storage(cfg)
+
+    with session_scope(factory) as session:
+        plan = fetch_pipeline.plan_fetch(session, task_id)
+
+    print(f"Fetching task {plan.task_id[:8]} ([dim]{plan.eaf_source} EAF[/dim])…")
+    result = fetch_pipeline.fetch_task(
+        plan, storage, dest.expanduser(), force=force
+    )
+
+    if result.media_cached:
+        print(f"  media:  [dim]{result.media_path}  (cached)[/dim]")
+    else:
+        print(f"  media:  {result.media_path}")
+    print(f"[green]Open in ELAN:[/green] {result.eaf_path}")
 
 
 @app.command("save")

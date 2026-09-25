@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from irl_corpus.db.models import AnnotationSchema, Segment, Task, TaskSave
+from irl_corpus.db.models import AnnotationSchema, Recording, Segment, Task, TaskSave
 from irl_corpus.db.queries import (
     get_chain,
     get_current_schema,
@@ -18,6 +21,7 @@ from irl_corpus.db.queries import (
     require_task,
     require_user,
 )
+from irl_corpus.pipeline import fetch
 from irl_corpus.storage import Storage
 
 
@@ -27,6 +31,38 @@ def _now() -> datetime:
 
 def _ts() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+
+def _put_eaf(
+    session: Session,
+    task: Task,
+    eaf_file: Path,
+    storage: Storage,
+    storage_path: str,
+) -> None:
+    """Store an annotator's EAF, repointing its media back at the corpus copy."""
+    seg = require_segment(session, task.segment_id)
+    rec = session.get(Recording, seg.recording_id)
+    if rec is None:
+        storage.put(eaf_file, storage_path)
+        return
+
+    abs_media = storage.url(rec.storage_path)
+    if not abs_media.startswith(("file://", "s3://")):
+        abs_media = f"file://{abs_media}"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        staged = Path(tmp) / Path(storage_path).name
+        shutil.copyfile(eaf_file, staged)
+        fetch.rewrite_media_url(
+            staged,
+            media_url=abs_media,
+            relative_media_url=os.path.relpath(
+                rec.storage_path, str(Path(storage_path).parent)
+            ),
+            time_origin_ms=seg.start_ms or 0,
+        )
+        storage.put(staged, storage_path)
 
 
 # ── task creation ─────────────────────────────────────────────────────────────
@@ -142,7 +178,7 @@ def save_partial(  # pylint: disable=too-many-arguments
         session.query(TaskSave).filter_by(task_id=task.id, is_final=False).count() + 1
     )
     storage_path = f"tasks/{task.id}/saves/{save_num:03d}_{_ts()}_{user.name}.eaf"
-    storage.put(eaf_file, storage_path)
+    _put_eaf(session, task, eaf_file, storage, storage_path)
 
     task_save = TaskSave(
         task_id=task.id,
@@ -183,7 +219,7 @@ def finish_annotation(  # pylint: disable=too-many-arguments
         raise ValueError(f"Task {task.id} has status='{task.status}', cannot finish.")
 
     storage_path = f"tasks/{task.id}/saves/final_{_ts()}_{user.name}.eaf"
-    storage.put(eaf_file, storage_path)
+    _put_eaf(session, task, eaf_file, storage, storage_path)
 
     session.add(
         TaskSave(
@@ -272,7 +308,7 @@ def reject_validation(  # pylint: disable=too-many-arguments
         raise ValueError(f"Task {task.id} has status='{task.status}', cannot reject.")
 
     storage_path = f"tasks/{task.id}/saves/rejected_{_ts()}_{user.name}.eaf"
-    storage.put(eaf_file, storage_path)
+    _put_eaf(session, task, eaf_file, storage, storage_path)
 
     session.add(
         TaskSave(
